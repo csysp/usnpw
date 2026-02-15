@@ -19,38 +19,8 @@ from typing import Sequence
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DIST_DIR = ROOT / "dist"
 
-COMPILE_TARGETS: tuple[str, ...] = (
-    "scripts/pwgen.py",
-    "scripts/opsec_username_gen.py",
-    "scripts/usnpw_gui.py",
-    "usnpw/core/password_engine.py",
-    "usnpw/core/username_engine.py",
-    "usnpw/core/username_stream_state.py",
-    "usnpw/core/username_uniqueness.py",
-    "usnpw/core/username_lexicon.py",
-    "usnpw/core/username_schemes.py",
-    "usnpw/core/username_generation.py",
-    "usnpw/core/username_storage.py",
-    "usnpw/core/models.py",
-    "usnpw/core/password_service.py",
-    "usnpw/core/username_service.py",
-    "usnpw/core/username_policies.py",
-    "usnpw/core/export_crypto.py",
-    "usnpw/core/dpapi.py",
-    "usnpw/core/services.py",
-    "usnpw/cli/pwgen_cli.py",
-    "usnpw/cli/opsec_username_cli.py",
-    "usnpw/gui/adapters.py",
-    "usnpw/gui/app.py",
-)
-
-TEST_MODULES: tuple[str, ...] = (
-    "tests.test_cli_args",
-    "tests.test_core_smoke",
-    "tests.test_service_layer",
-    "tests.test_gui_adapters",
-    "tests.test_export_crypto",
-)
+COMPILE_ROOTS: tuple[str, ...] = ("scripts", "usnpw", "tools")
+TESTS_ROOT = ROOT / "tests"
 
 RELEASE_GLOBS: tuple[str, ...] = (
     "README.md",
@@ -87,20 +57,54 @@ def _rel(path: Path) -> str:
     return path.relative_to(ROOT).as_posix()
 
 
+def discover_compile_targets() -> tuple[str, ...]:
+    targets: set[str] = set()
+    for rel_root in COMPILE_ROOTS:
+        root = ROOT / rel_root
+        if not root.exists():
+            continue
+        for path in root.rglob("*.py"):
+            if "__pycache__" in path.parts:
+                continue
+            if path.is_file():
+                targets.add(_rel(path))
+    return tuple(sorted(targets))
+
+
+def discover_test_modules() -> tuple[str, ...]:
+    if not TESTS_ROOT.exists():
+        return ()
+    modules: list[str] = []
+    for path in sorted(TESTS_ROOT.rglob("test_*.py")):
+        if "__pycache__" in path.parts:
+            continue
+        rel = path.relative_to(ROOT).with_suffix("")
+        modules.append(".".join(rel.parts))
+    return tuple(modules)
+
+
 def run_preflight() -> int:
     if str(ROOT) not in sys.path:
         sys.path.insert(0, str(ROOT))
 
+    compile_targets = discover_compile_targets()
+    if not compile_targets:
+        raise ValueError("no compile targets discovered")
+
     print("[preflight] compile checks")
-    for target in COMPILE_TARGETS:
+    for target in compile_targets:
         path = ROOT / target
         print(f"  - {target}")
         py_compile.compile(str(path), doraise=True)
 
+    test_modules = discover_test_modules()
+    if not test_modules:
+        raise ValueError(f"no test modules discovered under '{TESTS_ROOT}'")
+
     print("[preflight] unit tests")
     loader = unittest.defaultTestLoader
     suite = unittest.TestSuite()
-    for module in TEST_MODULES:
+    for module in test_modules:
         print(f"  - {module}")
         suite.addTests(loader.loadTestsFromName(module))
     result = unittest.TextTestRunner(verbosity=2).run(suite)

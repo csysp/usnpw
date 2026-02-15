@@ -3,6 +3,7 @@ from __future__ import annotations
 import subprocess
 import sys
 import os
+import time
 import unittest
 
 from usnpw.core.password_engine import generate_password
@@ -63,6 +64,31 @@ class CoreSmokeTests(unittest.TestCase):
                 path.unlink()
             except OSError:
                 pass
+
+    def test_acquire_stream_lock_reclaims_stale_file(self) -> None:
+        suffix = f"{os.getpid()}_{time.time_ns()}"
+        state_path = Path(f".tmp_stream_state_{suffix}.json")
+        lock_path = state_path.with_name(state_path.name + ".lock")
+        try:
+            lock_path.write_text(f"{os.getpid()} 0 stale-token\n", encoding="ascii")
+            stale_time = time.time() - 7200
+            os.utime(lock_path, (stale_time, stale_time))
+
+            lock = username_stream_state.acquire_stream_state_lock(state_path, timeout_sec=0.5)
+            try:
+                self.assertEqual(lock.path, lock_path)
+                token = lock_path.read_text(encoding="ascii").split()[2]
+                self.assertEqual(token, lock.owner_token)
+            finally:
+                username_stream_state.release_stream_state_lock(lock)
+
+            self.assertFalse(lock_path.exists())
+        finally:
+            for path in (state_path, lock_path):
+                try:
+                    path.unlink()
+                except OSError:
+                    pass
 
     def test_stream_api_reexports_are_stable(self) -> None:
         self.assertIs(username_engine.StreamStateLock, username_stream_state.StreamStateLock)

@@ -73,6 +73,30 @@ def generate_usernames(request: UsernameRequest) -> UsernameResult:
 
     try:
         bl_path = Path(request.blacklist).expanduser()
+        username_blacklist_lock: Optional[engine.StreamStateLock] = None
+        token_blacklist_lock: Optional[engine.StreamStateLock] = None
+        token_persist_enabled = (
+            not request.no_token_block
+            and not request.no_token_save
+            and (request.uniqueness_mode == "blacklist" or request.stream_save_tokens)
+        )
+        if request.uniqueness_mode == "blacklist" and not request.no_save:
+            # Threat model: in blacklist mode with persistence enabled, load+append must be
+            # serialized across processes to avoid duplicate admissions from stale in-memory sets.
+            try:
+                username_blacklist_lock = engine.acquire_stream_state_lock(bl_path)
+            except (OSError, ValueError) as exc:
+                raise ValueError(f"Unable to acquire username blacklist lock '{bl_path}': {exc}") from exc
+
+        token_path = Path(request.token_blacklist).expanduser()
+        if token_persist_enabled:
+            # Threat model: token-block uniqueness should remain stable across concurrent
+            # writers when persistence is enabled, so load+append is serialized.
+            try:
+                token_blacklist_lock = engine.acquire_stream_state_lock(token_path)
+            except (OSError, ValueError) as exc:
+                raise ValueError(f"Unable to acquire token blacklist lock '{token_path}': {exc}") from exc
+
         username_blacklist: Set[str] = set()
         if request.uniqueness_mode == "blacklist":
             username_blacklist = {
@@ -81,7 +105,6 @@ def generate_usernames(request: UsernameRequest) -> UsernameResult:
                 if engine.normalize_username_key(u, case_insensitive=policy.case_insensitive)
             }
 
-        token_path = Path(request.token_blacklist).expanduser()
         token_blacklist: Set[str] = set()
         if not request.no_token_block:
             token_blacklist = {
@@ -304,5 +327,9 @@ def generate_usernames(request: UsernameRequest) -> UsernameResult:
         finally:
             if stream_lock is not None:
                 engine.release_stream_state_lock(stream_lock)
+            if token_blacklist_lock is not None:
+                engine.release_stream_state_lock(token_blacklist_lock)
+            if username_blacklist_lock is not None:
+                engine.release_stream_state_lock(username_blacklist_lock)
     except (OSError, UnicodeError) as exc:
         raise ValueError(f"I/O failure during username generation: {exc}") from exc

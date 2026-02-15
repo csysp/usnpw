@@ -777,7 +777,9 @@ class USnPwApp(tk.Tk):
             except (ValueError, OSError, UnicodeError, RuntimeError) as exc:
                 self._events.put(("err", (str(exc), "")))
             except Exception as exc:
-                self._events.put(("err", ("internal error: unexpected background task failure", traceback.format_exc())))
+                context = "internal error: unexpected background task failure"
+                self._events.put(("err", (context, traceback.format_exc())))
+                raise RuntimeError(context) from exc
 
         threading.Thread(target=worker, daemon=True).start()
 

@@ -35,22 +35,6 @@ def _lock_metadata(pid: int, token: str) -> bytes:
     return f"{pid} {int(time.time())} {token}\n".encode("ascii")
 
 
-def _parse_lock_pid(path: Path) -> Optional[int]:
-    try:
-        raw = path.read_text(encoding="ascii", errors="ignore").strip()
-    except OSError:
-        return None
-    if not raw:
-        return None
-    parts = raw.split()
-    if not parts:
-        return None
-    try:
-        return int(parts[0])
-    except ValueError:
-        return None
-
-
 def _lock_owner_token(path: Path) -> Optional[str]:
     try:
         raw = path.read_text(encoding="ascii", errors="ignore").strip()
@@ -62,28 +46,14 @@ def _lock_owner_token(path: Path) -> Optional[str]:
     return parts[2]
 
 
-def _pid_is_running(pid: int) -> bool:
-    if pid <= 0:
-        return False
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    except OSError:
-        return False
-    return True
-
-
 def touch_stream_state_lock(lock: StreamStateLock) -> None:
     try:
         os.lseek(lock.fd, 0, os.SEEK_SET)
         os.ftruncate(lock.fd, 0)
         os.write(lock.fd, _lock_metadata(lock.owner_pid, lock.owner_token))
         os.fsync(lock.fd)
-    except OSError:
-        pass
+    except OSError as exc:
+        raise ValueError(f"Unable to refresh stream state lock '{lock.path}': {exc}") from exc
 
 
 def acquire_stream_state_lock(state_path: Path, timeout_sec: float = _STREAM_LOCK_TIMEOUT_SEC) -> StreamStateLock:
@@ -98,21 +68,30 @@ def acquire_stream_state_lock(state_path: Path, timeout_sec: float = _STREAM_LOC
             try:
                 os.write(fd, _lock_metadata(owner_pid, owner_token))
                 os.fsync(fd)
-            except OSError:
-                pass
+            except OSError as exc:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+                try:
+                    lock_path.unlink()
+                except OSError:
+                    pass
+                raise ValueError(f"Unable to initialize stream state lock '{lock_path}': {exc}") from exc
             return StreamStateLock(path=lock_path, fd=fd, owner_pid=owner_pid, owner_token=owner_token)
         except FileExistsError:
             try:
                 lock_age = time.time() - lock_path.stat().st_mtime
                 if lock_age > _STREAM_LOCK_STALE_SEC:
-                    lock_pid = _parse_lock_pid(lock_path)
-                    if lock_pid is not None and _pid_is_running(lock_pid):
+                    # Staleness is governed by heartbeat age, not PID checks, to avoid
+                    # deadlocks from PID reuse across process lifecycles.
+                    try:
+                        lock_path.unlink()
+                    except FileNotFoundError:
+                        continue
+                    except OSError:
                         pass
                     else:
-                        try:
-                            lock_path.unlink()
-                        except OSError:
-                            pass
                         continue
             except OSError:
                 pass

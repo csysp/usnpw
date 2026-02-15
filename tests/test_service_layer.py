@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import os
+import time
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from usnpw.core.models import PasswordRequest, UsernameRequest
@@ -130,6 +133,124 @@ class ServiceLayerTests(unittest.TestCase):
         load_state.assert_not_called()
         save_state.assert_not_called()
         release_lock.assert_not_called()
+
+    def test_blacklist_mode_save_acquires_and_releases_lock(self) -> None:
+        suffix = f"{os.getpid()}_{time.time_ns()}"
+        blacklist_path = Path(f".tmp_names_{suffix}.txt")
+        token_path = Path(f".tmp_tokens_{suffix}.txt")
+        try:
+            request = UsernameRequest(
+                count=2,
+                min_len=5,
+                max_len=12,
+                profile="reddit",
+                uniqueness_mode="blacklist",
+                blacklist=str(blacklist_path),
+                token_blacklist=str(token_path),
+                no_save=False,
+                no_token_save=True,
+                no_token_block=True,
+            )
+            lock_obj = object()
+            with (
+                patch("usnpw.core.username_service.engine.acquire_stream_state_lock", return_value=lock_obj) as acquire_lock,
+                patch("usnpw.core.username_service.engine.release_stream_state_lock") as release_lock,
+            ):
+                result = generate_usernames(request)
+
+            self.assertEqual(len(result.records), 2)
+            acquire_lock.assert_called_once_with(blacklist_path)
+            release_lock.assert_called_once_with(lock_obj)
+            self.assertTrue(blacklist_path.exists())
+        finally:
+            for path in (
+                blacklist_path,
+                token_path,
+                blacklist_path.with_name(blacklist_path.name + ".lock"),
+                token_path.with_name(token_path.name + ".lock"),
+            ):
+                try:
+                    path.unlink()
+                except OSError:
+                    pass
+
+    def test_blacklist_mode_no_save_skips_lock(self) -> None:
+        suffix = f"{os.getpid()}_{time.time_ns()}"
+        blacklist_path = Path(f".tmp_names_{suffix}.txt")
+        token_path = Path(f".tmp_tokens_{suffix}.txt")
+        try:
+            request = UsernameRequest(
+                count=2,
+                min_len=5,
+                max_len=12,
+                profile="reddit",
+                uniqueness_mode="blacklist",
+                blacklist=str(blacklist_path),
+                token_blacklist=str(token_path),
+                no_save=True,
+                no_token_save=True,
+                no_token_block=True,
+            )
+            with (
+                patch("usnpw.core.username_service.engine.acquire_stream_state_lock") as acquire_lock,
+                patch("usnpw.core.username_service.engine.release_stream_state_lock") as release_lock,
+            ):
+                result = generate_usernames(request)
+
+            self.assertEqual(len(result.records), 2)
+            acquire_lock.assert_not_called()
+            release_lock.assert_not_called()
+        finally:
+            for path in (
+                blacklist_path,
+                token_path,
+                blacklist_path.with_name(blacklist_path.name + ".lock"),
+                token_path.with_name(token_path.name + ".lock"),
+            ):
+                try:
+                    path.unlink()
+                except OSError:
+                    pass
+
+    def test_blacklist_mode_token_save_acquires_token_lock(self) -> None:
+        suffix = f"{os.getpid()}_{time.time_ns()}"
+        blacklist_path = Path(f".tmp_names_{suffix}.txt")
+        token_path = Path(f".tmp_tokens_{suffix}.txt")
+        try:
+            request = UsernameRequest(
+                count=2,
+                min_len=5,
+                max_len=12,
+                profile="reddit",
+                uniqueness_mode="blacklist",
+                blacklist=str(blacklist_path),
+                token_blacklist=str(token_path),
+                no_save=True,
+                no_token_save=False,
+                no_token_block=False,
+            )
+            token_lock = object()
+            with (
+                patch("usnpw.core.username_service.engine.acquire_stream_state_lock", return_value=token_lock) as acquire_lock,
+                patch("usnpw.core.username_service.engine.release_stream_state_lock") as release_lock,
+            ):
+                result = generate_usernames(request)
+
+            self.assertEqual(len(result.records), 2)
+            acquire_lock.assert_called_once_with(token_path)
+            release_lock.assert_called_once_with(token_lock)
+            self.assertTrue(token_path.exists())
+        finally:
+            for path in (
+                blacklist_path,
+                token_path,
+                blacklist_path.with_name(blacklist_path.name + ".lock"),
+                token_path.with_name(token_path.name + ".lock"),
+            ):
+                try:
+                    path.unlink()
+                except OSError:
+                    pass
 
     def test_safe_mode_overrides(self) -> None:
         original = UsernameRequest(
