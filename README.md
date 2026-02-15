@@ -1,0 +1,122 @@
+# USnPw
+
+Local-first, stdlib-only tooling for secure password generation and OPSEC-focused username generation.
+
+## Safety Notice
+Do not use this project for illegal activity. You are responsible for your own use.
+
+## Platform Support
+- Windows (source mode + `UsnPw.exe` release artifact)
+- Linux (source mode + `UsnPw` release artifact)
+- macOS (source mode + `UsnPw` or `UsnPw.app` release artifact)
+
+## Install and Setup
+Use `docs/SETUP.md` for complete platform-specific setup, binary install, checksum verification, and troubleshooting.
+
+Quick source run:
+
+```powershell
+# Windows (PowerShell)
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+py .\scripts\usnpw_gui.py
+```
+
+```bash
+# Linux/macOS (bash/zsh)
+python3 -m venv .venv
+source .venv/bin/activate
+python3 ./scripts/usnpw_gui.py
+```
+
+## What You Get
+- `scripts/pwgen.py`: password/token generator
+- `scripts/opsec_username_gen.py`: anti-fingerprinting username generator
+- `scripts/usnpw_gui.py`: cross-platform GUI using the same service layer as CLI
+- `usnpw/core/*`: reusable API layer
+- No telemetry, no network calls, no external runtime dependencies
+
+## Quick Usage
+
+```powershell
+# Windows
+py .\scripts\pwgen.py -n 5 -l 24
+py .\scripts\opsec_username_gen.py -n 20 --profile reddit
+py .\scripts\usnpw_gui.py
+```
+
+```bash
+# Linux/macOS
+python3 ./scripts/pwgen.py -n 5 -l 24
+python3 ./scripts/opsec_username_gen.py -n 20 --profile reddit
+python3 ./scripts/usnpw_gui.py
+```
+
+## Supported Username Profiles
+- `generic`
+- `reddit`
+- `x`
+- `github`
+- `discord`
+- `facebook`
+- `linkedin`
+- `instagram`
+- `pinterest`
+- `snapchat`
+- `telegram`
+- `tiktok`
+- `douyin`
+- `vk`
+- `youtube`
+
+## Documentation
+- `docs/SETUP.md`: install and setup for Windows, Linux, and macOS
+- `docs/ADVANCED_USAGE.md`: advanced tuning, OPSEC tradeoffs, and troubleshooting
+- `docs/ARCHITECTURE.md`: module boundaries and API model
+- `docs/INDEX.md`: docs map
+- `CONTRIBUTING.md`: contribution workflow
+- `SECURITY.md`: vulnerability reporting policy
+
+## Programmatic API
+```python
+from usnpw.core.models import PasswordRequest, UsernameRequest
+from usnpw.core.password_service import generate_passwords
+from usnpw.core.username_service import generate_usernames
+
+pw = generate_passwords(PasswordRequest(count=3, length=24))
+un = generate_usernames(UsernameRequest(count=20, profile="reddit"))
+```
+
+## Development and Release
+```powershell
+# compile + tests
+py .\tools\release.py preflight
+
+# source artifact + checksums
+py .\tools\release.py all
+
+# source + host-native binaries + checksums
+py .\tools\release.py all --with-binaries
+```
+
+```bash
+# Linux/macOS equivalents
+python3 ./tools/release.py preflight
+python3 ./tools/release.py all
+python3 ./tools/release.py all --with-binaries
+```
+
+Notes:
+- Build binaries natively on each target OS (no cross-compilation in this workflow).
+- PyInstaller is pinned to `6.16.0` for release/CI consistency.
+
+## Repository Layout
+- `scripts/pwgen.py`, `scripts/opsec_username_gen.py`, `scripts/usnpw_gui.py`: entrypoints
+- `usnpw/core/*`: engines, policies, storage, stream state, service orchestration
+- `usnpw/cli/*`: CLI parsing and command dispatch
+- `usnpw/gui/*`: GUI app and adapter mapping
+- `tests/*`: stdlib unit tests
+- `tools/release.py`: preflight/release automation
+
+## License
+This project is licensed under GNU GPLv3 (`GPL-3.0-only`). See `LICENSE`.

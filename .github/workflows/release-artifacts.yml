@@ -1,0 +1,73 @@
+name: Release Artifacts
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source:
+    name: Source Bundle
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Build source artifact
+        run: python tools/release.py all
+
+      - name: Upload source artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: UsnPw-source
+          if-no-files-found: error
+          path: |
+            dist/UsnPw-source-*.zip
+            dist/UsnPw-source-*.zip.sha256
+
+  binaries:
+    name: Native Binaries (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+          - macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install PyInstaller
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pyinstaller==6.16.0
+
+      - name: Build default app binary
+        run: python tools/release.py binaries
+
+      - name: Upload binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: UsnPw-${{ matrix.os }}
+          if-no-files-found: error
+          path: |
+            dist/bin/UsnPw*
+            dist/bin/*.sha256

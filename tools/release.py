@@ -1,0 +1,343 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import hashlib
+import importlib.util
+import os
+import py_compile
+import shutil
+import subprocess
+import sys
+import unittest
+import zipfile
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Sequence
+
+ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_DIST_DIR = ROOT / "dist"
+
+COMPILE_TARGETS: tuple[str, ...] = (
+    "scripts/pwgen.py",
+    "scripts/opsec_username_gen.py",
+    "scripts/usnpw_gui.py",
+    "usnpw/core/password_engine.py",
+    "usnpw/core/username_engine.py",
+    "usnpw/core/username_stream_state.py",
+    "usnpw/core/username_uniqueness.py",
+    "usnpw/core/username_lexicon.py",
+    "usnpw/core/username_schemes.py",
+    "usnpw/core/username_generation.py",
+    "usnpw/core/username_storage.py",
+    "usnpw/core/models.py",
+    "usnpw/core/password_service.py",
+    "usnpw/core/username_service.py",
+    "usnpw/core/username_policies.py",
+    "usnpw/core/export_crypto.py",
+    "usnpw/core/dpapi.py",
+    "usnpw/core/services.py",
+    "usnpw/cli/pwgen_cli.py",
+    "usnpw/cli/opsec_username_cli.py",
+    "usnpw/gui/adapters.py",
+    "usnpw/gui/app.py",
+)
+
+TEST_MODULES: tuple[str, ...] = (
+    "tests.test_cli_args",
+    "tests.test_core_smoke",
+    "tests.test_service_layer",
+    "tests.test_gui_adapters",
+    "tests.test_export_crypto",
+)
+
+RELEASE_GLOBS: tuple[str, ...] = (
+    "README.md",
+    "AGENTS.md",
+    "bip39_english.txt",
+    "scripts/**/*.py",
+    "usnpw/**/*.py",
+    "tests/**/*.py",
+    "tools/release.py",
+)
+
+
+@dataclass(frozen=True)
+class BinaryTarget:
+    key: str
+    entrypoint: str
+    output_base: str
+    windowed: bool = False
+
+
+BINARY_TARGETS: tuple[BinaryTarget, ...] = (
+    BinaryTarget(key="gui", entrypoint="scripts/usnpw_gui.py", output_base="UsnPw", windowed=True),
+    BinaryTarget(key="pwgen", entrypoint="scripts/pwgen.py", output_base="UsnPw-pwgen"),
+    BinaryTarget(key="username", entrypoint="scripts/opsec_username_gen.py", output_base="UsnPw-username"),
+)
+DEFAULT_BINARY_TARGETS: tuple[str, ...] = ("gui",)
+
+
+def _binary_target_map() -> dict[str, BinaryTarget]:
+    return {target.key: target for target in BINARY_TARGETS}
+
+
+def _rel(path: Path) -> str:
+    return path.relative_to(ROOT).as_posix()
+
+
+def run_preflight() -> int:
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+
+    print("[preflight] compile checks")
+    for target in COMPILE_TARGETS:
+        path = ROOT / target
+        print(f"  - {target}")
+        py_compile.compile(str(path), doraise=True)
+
+    print("[preflight] unit tests")
+    loader = unittest.defaultTestLoader
+    suite = unittest.TestSuite()
+    for module in TEST_MODULES:
+        print(f"  - {module}")
+        suite.addTests(loader.loadTestsFromName(module))
+    result = unittest.TextTestRunner(verbosity=2).run(suite)
+    return 0 if result.wasSuccessful() else 1
+
+
+def release_files() -> list[Path]:
+    out: dict[str, Path] = {}
+    for pattern in RELEASE_GLOBS:
+        for path in ROOT.glob(pattern):
+            if not path.is_file():
+                continue
+            if "__pycache__" in path.parts:
+                continue
+            rel = _rel(path)
+            out[rel] = path
+    return [out[k] for k in sorted(out)]
+
+
+def build_bundle(dist_dir: Path) -> Path:
+    dist_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%SZ")
+    artifact = dist_dir / f"UsnPw-source-{stamp}.zip"
+    files = release_files()
+    with zipfile.ZipFile(artifact, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
+        for path in files:
+            zf.write(path, arcname=_rel(path))
+    print(f"[bundle] wrote {artifact}")
+    print(f"[bundle] files: {len(files)}")
+    return artifact
+
+
+def sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def sha256_tree(path: Path) -> str:
+    h = hashlib.sha256()
+    files = sorted(p for p in path.rglob("*") if p.is_file())
+    for file_path in files:
+        rel = file_path.relative_to(path).as_posix().encode("utf-8")
+        h.update(rel)
+        h.update(b"\0")
+        with file_path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                h.update(chunk)
+    return h.hexdigest()
+
+
+def sha256_path(path: Path) -> str:
+    if path.is_file():
+        return sha256_file(path)
+    if path.is_dir():
+        return sha256_tree(path)
+    raise ValueError(f"artifact path must be file or directory: {path}")
+
+
+def write_checksum(artifact: Path) -> Path:
+    digest = sha256_path(artifact)
+    sidecar = artifact.with_suffix(artifact.suffix + ".sha256")
+    sidecar.write_text(f"{digest} *{artifact.name}\n", encoding="utf-8")
+    print(f"[checksums] sha256={digest}")
+    print(f"[checksums] wrote {sidecar}")
+    return sidecar
+
+
+def write_checksums(artifacts: Sequence[Path]) -> list[Path]:
+    out: list[Path] = []
+    for artifact in artifacts:
+        out.append(write_checksum(artifact))
+    return out
+
+
+def _resolve_pyinstaller() -> list[str]:
+    if importlib.util.find_spec("PyInstaller") is not None:
+        return [sys.executable, "-m", "PyInstaller"]
+    if shutil.which("pyinstaller"):
+        return ["pyinstaller"]
+    return [sys.executable, "-m", "PyInstaller"]
+
+
+def _target_artifact_path(bin_dir: Path, output_base: str) -> Path | None:
+    candidates = (
+        bin_dir / f"{output_base}.exe",
+        bin_dir / f"{output_base}.app",
+        bin_dir / output_base,
+    )
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def build_binaries(dist_dir: Path, target_keys: Sequence[str]) -> list[Path]:
+    targets = _binary_target_map()
+    selected: list[BinaryTarget] = [targets[key] for key in target_keys]
+    if not selected:
+        raise ValueError("at least one binary target is required")
+
+    pyinstaller_cmd = _resolve_pyinstaller()
+    bin_dir = dist_dir / "bin"
+    work_root = dist_dir / "build-pyinstaller"
+    spec_dir = dist_dir / "spec"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    work_root.mkdir(parents=True, exist_ok=True)
+    spec_dir.mkdir(parents=True, exist_ok=True)
+
+    artifacts: list[Path] = []
+    for target in selected:
+        cmd = [
+            *pyinstaller_cmd,
+            "--noconfirm",
+            "--clean",
+            "--onefile",
+            "--name",
+            target.output_base,
+            "--distpath",
+            str(bin_dir),
+            "--workpath",
+            str(work_root / target.key),
+            "--specpath",
+            str(spec_dir),
+        ]
+        if target.windowed:
+            cmd.append("--windowed")
+        cmd.append(target.entrypoint)
+
+        print(f"[binaries] building {target.key} -> {target.output_base}")
+        proc = subprocess.run(cmd, cwd=ROOT)
+        if proc.returncode != 0:
+            raise RuntimeError(
+                "PyInstaller build failed. Install PyInstaller on the build host "
+                "(`py -m pip install pyinstaller`) and retry."
+            )
+
+        artifact = _target_artifact_path(bin_dir, target.output_base)
+        if artifact is None:
+            raise RuntimeError(
+                f"expected binary artifact not found for target '{target.key}' ({target.output_base})"
+            )
+        print(f"[binaries] wrote {artifact}")
+        artifacts.append(artifact)
+
+    return artifacts
+
+
+def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="USnPw Phase 4 release helper (preflight, bundle, checksums, binaries)."
+    )
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    sub.add_parser("preflight", help="Run compile + unit test checks.")
+
+    bundle = sub.add_parser("bundle", help="Build source artifact zip in dist directory.")
+    bundle.add_argument("--dist-dir", default=str(DEFAULT_DIST_DIR))
+
+    checksums = sub.add_parser("checksums", help="Write .sha256 sidecar for an artifact.")
+    checksums.add_argument("--artifact", required=True)
+
+    binaries = sub.add_parser("binaries", help="Build host-native binaries with PyInstaller.")
+    binaries.add_argument("--dist-dir", default=str(DEFAULT_DIST_DIR))
+    binaries.add_argument(
+        "--target",
+        action="append",
+        choices=[t.key for t in BINARY_TARGETS],
+        help="Binary target to build (repeat flag). Default: gui target only.",
+    )
+    binaries.add_argument(
+        "--no-checksums",
+        action="store_true",
+        help="Skip writing .sha256 files for built binaries.",
+    )
+
+    all_cmd = sub.add_parser("all", help="Run preflight, then bundle, then checksums.")
+    all_cmd.add_argument("--dist-dir", default=str(DEFAULT_DIST_DIR))
+    all_cmd.add_argument(
+        "--with-binaries",
+        action="store_true",
+        help="Also build host-native binaries and checksums (requires PyInstaller).",
+    )
+    all_cmd.add_argument(
+        "--binary-target",
+        action="append",
+        choices=[t.key for t in BINARY_TARGETS],
+        help="When used with --with-binaries, restrict binaries to these targets.",
+    )
+
+    return parser.parse_args(argv)
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = _parse_args(sys.argv[1:] if argv is None else argv)
+    command = args.command
+
+    try:
+        if command == "preflight":
+            return run_preflight()
+        if command == "bundle":
+            build_bundle(Path(args.dist_dir))
+            return 0
+        if command == "checksums":
+            artifact = Path(args.artifact).expanduser()
+            if not artifact.is_file():
+                raise ValueError(f"artifact not found: {artifact}")
+            write_checksum(artifact)
+            return 0
+        if command == "binaries":
+            dist_dir = Path(args.dist_dir).expanduser()
+            target_keys = tuple(args.target or DEFAULT_BINARY_TARGETS)
+            artifacts = build_binaries(dist_dir, target_keys=target_keys)
+            if not args.no_checksums:
+                write_checksums(artifacts)
+            return 0
+        if command == "all":
+            rc = run_preflight()
+            if rc != 0:
+                return rc
+            dist_dir = Path(args.dist_dir).expanduser()
+            artifact = build_bundle(dist_dir)
+            write_checksum(artifact)
+            if args.with_binaries:
+                target_keys = tuple(args.binary_target or DEFAULT_BINARY_TARGETS)
+                binary_artifacts = build_binaries(dist_dir, target_keys=target_keys)
+                write_checksums(binary_artifacts)
+            return 0
+    except (OSError, ValueError, RuntimeError, py_compile.PyCompileError) as exc:
+        print(f"release tool failed: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"release tool failed: unknown command {command!r}", file=sys.stderr)
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

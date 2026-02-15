@@ -1,0 +1,30 @@
+# Python caches/artifacts
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Local temp/state artifacts
+.tmp_*
+tmp*/
+.tmp*/
+*.tmp
+
+# Build/release output
+dist/
+build/
+*.spec
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE/editor metadata
+.vscode/
+.idea/
+
+# OS junk
+.DS_Store
+Thumbs.db
