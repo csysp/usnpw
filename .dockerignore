@@ -1,0 +1,30 @@
+# VCS and CI metadata
+.git
+.gitignore
+.gitattributes
+.github/
+
+# Local Python artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local environments
+.venv/
+venv/
+env/
+
+# Build outputs and local temp/state files
+dist/
+build/
+*.spec
+.tmp*
+tmp*
+
+# Editor/OS noise
+.DS_Store
+Thumbs.db

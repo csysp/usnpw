@@ -74,6 +74,7 @@ python3 ./scripts/usnpw_gui.py
 - `docs/SETUP.md`: install and setup for Windows, Linux, and macOS
 - `docs/ADVANCED_USAGE.md`: advanced tuning, OPSEC tradeoffs, and troubleshooting
 - `docs/ARCHITECTURE.md`: module boundaries and API model
+- `docs/DOCKER_CHECKLIST.md`: phased Docker/GHCR implementation plan
 - `docs/INDEX.md`: docs map
 - `CONTRIBUTING.md`: contribution workflow
 - `SECURITY.md`: vulnerability reporting policy
@@ -87,6 +88,33 @@ from usnpw.core.username_service import generate_usernames
 pw = generate_passwords(PasswordRequest(count=3, length=24))
 un = generate_usernames(UsernameRequest(count=20, profile="reddit"))
 ```
+
+## Container Distribution (GHCR)
+Image format:
+
+```text
+ghcr.io/<owner>/<image>:<tag>
+```
+
+UsnPw image examples:
+
+```text
+ghcr.io/csysp/usnpw:sha-<commit>
+ghcr.io/csysp/usnpw:v1.0.0
+```
+
+Private package pull (if package visibility is private):
+
+```bash
+echo "$GHCR_READ_TOKEN" | docker login ghcr.io -u <github-username> --password-stdin
+docker pull ghcr.io/csysp/usnpw:v1.0.0
+```
+
+Private-network runtime summary:
+- API listens on `8080` in container.
+- Requests to `POST /v1/passwords` and `POST /v1/usernames` require `Authorization: Bearer <USNPW_API_TOKEN>`.
+- `USNPW_API_TOKEN` must be set at container startup.
+- Keep deployments on internal/private networks and run with `--read-only` + `--tmpfs /tmp`.
 
 ## Development and Release
 ```powershell

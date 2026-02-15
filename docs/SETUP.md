@@ -11,6 +11,43 @@ This guide covers install and setup for Windows, Linux, and macOS in both source
 - No external Python dependencies for runtime (stdlib-only project).
 - Optional for local binary builds: PyInstaller `6.16.0`.
 - Optional for BIP39 mode: local 2048-word BIP39 wordlist file.
+- Optional for container mode: Docker Engine with BuildKit enabled.
+
+## Container Setup (Phase 2 API Baseline)
+
+This phase provides a hardened non-root container running the stdlib API adapter for private-network use.
+
+Build image:
+
+```bash
+docker build -t usnpw:local .
+```
+
+Run API server (requires token):
+
+```bash
+docker run --rm \
+  -p 8080:8080 \
+  -e USNPW_API_TOKEN='replace-with-strong-token' \
+  --read-only \
+  --tmpfs /tmp:rw,noexec,nosuid,size=16m \
+  usnpw:local
+```
+
+Probe health and make authenticated requests:
+
+```bash
+curl http://127.0.0.1:8080/healthz
+curl -X POST http://127.0.0.1:8080/v1/passwords \
+  -H 'Authorization: Bearer replace-with-strong-token' \
+  -H 'Content-Type: application/json' \
+  -d '{"count":2,"length":24,"format":"password"}'
+```
+
+Hardening recommendations:
+- Run with `--read-only` and `--tmpfs /tmp`.
+- Avoid host mounts unless you explicitly need local persistence for stream/token state.
+- Keep container on private networks only during team rollout.
 
 ## Source Setup: Windows
 

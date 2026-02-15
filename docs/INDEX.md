@@ -7,6 +7,7 @@
 ## Guides
 - `docs/ADVANCED_USAGE.md`: OPSEC tuning, large-batch strategy, troubleshooting
 - `docs/ARCHITECTURE.md`: module boundaries and reusable API shape
+- `docs/DOCKER_CHECKLIST.md`: phased Docker/GHCR implementation checklist
 
 ## Project Policy
 - `CONTRIBUTING.md`: contribution workflow and coding standards
