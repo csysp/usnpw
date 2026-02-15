@@ -92,11 +92,18 @@ jobs:
           path: artifacts
 
       - name: Import GPG key
+        id: gpg
         shell: bash
         run: |
           set -euo pipefail
           echo "${{ secrets.USNPW_GPG_PRIVATE_KEY }}" | gpg --batch --import
-          gpg --armor --export > artifacts/usnpw-release-publickey.asc
+          key_id="$(gpg --batch --list-secret-keys --with-colons | awk -F: '$1==\"fpr\" {print $10; exit}')"
+          if [[ -z "$key_id" ]]; then
+            echo "::error::No secret key available after import."
+            exit 1
+          fi
+          echo "key_id=$key_id" >> "$GITHUB_OUTPUT"
+          gpg --batch --armor --export "$key_id" > artifacts/usnpw-release-publickey.asc
 
       - name: Sign *.sha256 sidecars
         shell: bash
@@ -114,9 +121,9 @@ jobs:
           for f in "${files[@]}"; do
             if [[ -n "${USNPW_GPG_PASSPHRASE:-}" ]]; then
               printf '%s' "$USNPW_GPG_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 \
-                --detach-sign --armor -o "${f}.asc" "${f}"
+                --local-user "${{ steps.gpg.outputs.key_id }}" --detach-sign --armor -o "${f}.asc" "${f}"
             else
-              gpg --batch --yes --detach-sign --armor -o "${f}.asc" "${f}"
+              gpg --batch --yes --local-user "${{ steps.gpg.outputs.key_id }}" --detach-sign --armor -o "${f}.asc" "${f}"
             fi
           done
 
