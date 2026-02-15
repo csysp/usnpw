@@ -110,7 +110,7 @@ class GuiAdapterTests(unittest.TestCase):
         self.assertIn("passphrase-encrypted", enc)
 
     def test_stream_state_path_helpers(self) -> None:
-        custom = effective_stream_state_path("reddit", ".\\custom_state.json")
+        custom = effective_stream_state_path("reddit", "./custom_state.json")
         self.assertEqual(custom.name, "custom_state.json")
         default = effective_stream_state_path("reddit", "")
         self.assertEqual(default.name, ".opsec_username_stream_reddit.json")
