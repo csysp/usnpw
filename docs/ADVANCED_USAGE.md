@@ -183,6 +183,36 @@ Safety controls include:
 5. Optional encrypted export on Windows.
 6. Unsafe path blocking and maintenance helpers.
 
+## Container Ops Hardening
+
+### 1. Token/Blacklist/State Volume Behavior
+By default, API mode enforces no username/token persistence and no stream-state persistence.
+
+If you explicitly relax those controls later, mount only the minimum path required and keep it per-tenant:
+1. token blacklist path and username blacklist path should be dedicated per deployment.
+2. stream state path should be dedicated per profile and tenant.
+3. never share state/token files across unrelated teams or identities.
+
+### 2. Replica Strategy
+Default to a single API replica unless you intentionally design shared-state coordination.
+
+Why:
+1. token/state persistence semantics become harder to reason about with parallel writers.
+2. anti-fingerprinting and uniqueness guarantees are easiest to audit in single-replica mode.
+
+If multi-replica is required:
+1. define shared storage locking semantics explicitly.
+2. pin deterministic routing for profile/state affinity.
+3. load-test saturation behavior before production rollout.
+
+### 3. Auth Token Rotation and Log Hygiene
+1. prefer `USNPW_API_TOKEN_FILE` secret mounts over plaintext env injection.
+2. keep `USNPW_API_ALLOW_ENV_TOKEN` disabled unless you have no file-based secret path.
+3. rotate bearer tokens on a fixed cadence and after any host/container compromise.
+4. keep `USNPW_API_ACCESS_LOG` disabled unless debugging; if enabled, treat logs as sensitive metadata.
+5. do not write generated passwords/usernames to centralized logs.
+6. terminate TLS at a trusted boundary or configure in-process TLS cert/key for untrusted network segments.
+
 ## Troubleshooting
 
 ### `bits must be a multiple of 8`

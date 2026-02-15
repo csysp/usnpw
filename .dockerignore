@@ -18,6 +18,9 @@ __pycache__/
 venv/
 env/
 
+# Secrets should never be part of build context.
+secrets/
+
 # Build outputs and local temp/state files
 dist/
 build/

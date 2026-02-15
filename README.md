@@ -1,5 +1,5 @@
 # USnPw
-[![Release Artifacts](https://github.com/csysp/UsnPw/actions/workflows/release-artifacts.yml/badge.svg)](https://github.com/csysp/UsnPw/actions/workflows/release-artifacts.yml)
+[![Release Artifacts](https://github.com/csysp/UsnPw/actions/workflows/release-artifacts.yml/badge.svg)](https://github.com/csysp/UsnPw/actions/workflows/release-artifacts.yml)[![Container GHCR](https://github.com/csysp/UsnPw/actions/workflows/container-ghcr.yml/badge.svg)](https://github.com/csysp/UsnPw/actions/workflows/container-ghcr.yml)[![CodeQL](https://github.com/csysp/UsnPw/actions/workflows/github-code-scanning/codeql/badge.svg)](https://github.com/csysp/UsnPw/actions/workflows/github-code-scanning/codeql)
 
 Local-first, stdlib-only tooling for secure password generation and OPSEC-focused username generation.
 
@@ -113,8 +113,10 @@ docker pull ghcr.io/csysp/usnpw:v1.0.0
 Private-network runtime summary:
 - API listens on `8080` in container.
 - Requests to `POST /v1/passwords` and `POST /v1/usernames` require `Authorization: Bearer <USNPW_API_TOKEN>`.
-- `USNPW_API_TOKEN` must be set at container startup.
-- Keep deployments on internal/private networks and run with `--read-only` + `--tmpfs /tmp`.
+- Prefer `USNPW_API_TOKEN_FILE` secret mount over plaintext `USNPW_API_TOKEN` env.
+- `USNPW_API_TOKEN` is blocked by default unless `USNPW_API_ALLOW_ENV_TOKEN=true` is set.
+- Keep deployments on internal/private networks and run with `--read-only`, `--tmpfs /tmp`, `--cap-drop ALL`, and `--security-opt no-new-privileges:true`.
+- For untrusted networks, terminate TLS in front of the service or provide `USNPW_API_TLS_CERT_FILE` + `USNPW_API_TLS_KEY_FILE`.
 
 ## Development and Release
 ```powershell

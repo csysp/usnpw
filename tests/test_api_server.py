@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import argparse
 import json
+import os
 import threading
 import unittest
 import urllib.error
 import urllib.request
+from pathlib import Path
 from unittest.mock import patch
 
-from usnpw.api.server import APIConfig, create_server
+from usnpw.api.server import APIConfig, _build_config, create_server
 
 
 class APIServerTests(unittest.TestCase):
@@ -39,12 +42,15 @@ class APIServerTests(unittest.TestCase):
         *,
         payload: dict[str, object] | bytes | None = None,
         token: str | None = None,
+        content_type: str = "application/json",
+        port: int | None = None,
     ) -> tuple[int, dict[str, object]]:
-        url = f"http://127.0.0.1:{self._port}{path}"
+        target_port = self._port if port is None else port
+        url = f"http://127.0.0.1:{target_port}{path}"
         headers: dict[str, str] = {}
         body: bytes | None = None
         if payload is not None:
-            headers["Content-Type"] = "application/json"
+            headers["Content-Type"] = content_type
             if isinstance(payload, bytes):
                 body = payload
             else:
@@ -116,6 +122,135 @@ class APIServerTests(unittest.TestCase):
         )
         self.assertEqual(status, 413)
         self.assertIn("error", payload)
+
+    def test_strict_content_type_rejects_jsonx(self) -> None:
+        status, payload = self._request(
+            "POST",
+            "/v1/passwords",
+            payload={"count": 1},
+            token="test-token",
+            content_type="application/jsonx",
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(payload.get("error"), "Content-Type must be application/json")
+
+    def test_auth_throttle_blocks_repeated_failures(self) -> None:
+        config = APIConfig(
+            host="127.0.0.1",
+            port=0,
+            token="rate-token",
+            max_body_bytes=1024,
+            max_password_count=20,
+            max_username_count=20,
+            auth_fail_limit=2,
+            auth_fail_window_seconds=60,
+            auth_block_seconds=60,
+        )
+        server = create_server(config)
+        port = int(server.server_address[1])
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            status1, _ = self._request(
+                "POST",
+                "/v1/passwords",
+                payload={"count": 1},
+                token="wrong-token",
+                port=port,
+            )
+            status2, payload2 = self._request(
+                "POST",
+                "/v1/passwords",
+                payload={"count": 1},
+                token="wrong-token",
+                port=port,
+            )
+            status3, payload3 = self._request(
+                "POST",
+                "/v1/passwords",
+                payload={"count": 1},
+                token="rate-token",
+                port=port,
+            )
+            self.assertEqual(status1, 401)
+            self.assertEqual(status2, 429)
+            self.assertEqual(payload2.get("error"), "too_many_auth_failures")
+            self.assertEqual(status3, 429)
+            self.assertEqual(payload3.get("error"), "too_many_auth_failures")
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_build_config_reads_token_file(self) -> None:
+        token_file = Path(".tmp_api_token_file.txt")
+        try:
+            token_file.write_text("file-token\n", encoding="utf-8")
+            args = argparse.Namespace(
+                host="127.0.0.1",
+                port=8080,
+                token="",
+                token_file=str(token_file),
+                max_body_bytes=1024,
+                max_password_count=10,
+                max_username_count=10,
+                max_concurrent_requests=32,
+                socket_timeout_seconds=5.0,
+                auth_fail_limit=5,
+                auth_fail_window_seconds=60,
+                auth_block_seconds=120,
+                tls_cert_file="",
+                tls_key_file="",
+                allow_env_token=False,
+            )
+            config = _build_config(args)
+            self.assertEqual(config.token, "file-token")
+        finally:
+            token_file.unlink(missing_ok=True)
+
+    def test_build_config_rejects_env_token_without_opt_in(self) -> None:
+        with patch.dict(os.environ, {"USNPW_API_TOKEN": "env-token"}, clear=False):
+            args = argparse.Namespace(
+                host="127.0.0.1",
+                port=8080,
+                token="",
+                token_file="",
+                max_body_bytes=1024,
+                max_password_count=10,
+                max_username_count=10,
+                max_concurrent_requests=32,
+                socket_timeout_seconds=5.0,
+                auth_fail_limit=5,
+                auth_fail_window_seconds=60,
+                auth_block_seconds=120,
+                tls_cert_file="",
+                tls_key_file="",
+                allow_env_token=False,
+            )
+            with self.assertRaisesRegex(ValueError, "USNPW_API_TOKEN is disabled by default"):
+                _build_config(args)
+
+    def test_build_config_allows_env_token_with_opt_in(self) -> None:
+        with patch.dict(os.environ, {"USNPW_API_TOKEN": "env-token"}, clear=False):
+            args = argparse.Namespace(
+                host="127.0.0.1",
+                port=8080,
+                token="",
+                token_file="",
+                max_body_bytes=1024,
+                max_password_count=10,
+                max_username_count=10,
+                max_concurrent_requests=32,
+                socket_timeout_seconds=5.0,
+                auth_fail_limit=5,
+                auth_fail_window_seconds=60,
+                auth_block_seconds=120,
+                tls_cert_file="",
+                tls_key_file="",
+                allow_env_token=True,
+            )
+            config = _build_config(args)
+            self.assertEqual(config.token, "env-token")
 
     def test_internal_error_returns_json_500(self) -> None:
         with patch("usnpw.api.server.generate_passwords", side_effect=RuntimeError("boom")):

@@ -28,9 +28,13 @@ Run API server (requires token):
 ```bash
 docker run --rm \
   -p 8080:8080 \
-  -e USNPW_API_TOKEN='replace-with-strong-token' \
+  -v "$(pwd)/secrets:/run/secrets:ro" \
+  -e USNPW_API_TOKEN_FILE=/run/secrets/usnpw_api_token.txt \
   --read-only \
   --tmpfs /tmp:rw,noexec,nosuid,size=16m \
+  --cap-drop ALL \
+  --security-opt no-new-privileges:true \
+  --pids-limit 256 \
   usnpw:local
 ```
 
@@ -39,13 +43,17 @@ Probe health and make authenticated requests:
 ```bash
 curl http://127.0.0.1:8080/healthz
 curl -X POST http://127.0.0.1:8080/v1/passwords \
-  -H 'Authorization: Bearer replace-with-strong-token' \
+  -H 'Authorization: Bearer YOUR_TOKEN_VALUE' \
   -H 'Content-Type: application/json' \
   -d '{"count":2,"length":24,"format":"password"}'
 ```
 
 Hardening recommendations:
-- Run with `--read-only` and `--tmpfs /tmp`.
+- Use `USNPW_API_TOKEN_FILE` secret mount instead of plaintext env where possible.
+- `USNPW_API_TOKEN` is disabled by default; only enable it intentionally via `USNPW_API_ALLOW_ENV_TOKEN=true`.
+- Run with `--read-only`, `--tmpfs /tmp`, `--cap-drop ALL`, and `--security-opt no-new-privileges:true`.
+- Set `USNPW_API_MAX_CONCURRENT_REQUESTS`, `USNPW_API_SOCKET_TIMEOUT_SECONDS`, and auth-throttle envs for your expected load profile.
+- If clients traverse untrusted links, terminate TLS in a reverse proxy, or mount cert/key and set `USNPW_API_TLS_CERT_FILE` + `USNPW_API_TLS_KEY_FILE`.
 - Avoid host mounts unless you explicitly need local persistence for stream/token state.
 - Keep container on private networks only during team rollout.
 

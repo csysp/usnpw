@@ -87,27 +87,27 @@ Design goal: least-invasive containerization for private-network team use, with 
 ## Phase 4: Private-Network Ops Hardening
 
 ### `docker-compose.private.yml` (optional but recommended)
-- [ ] Internal-network deployment example.
-- [ ] Read-only root fs.
-- [ ] `tmpfs` mounts for writable paths.
-- [ ] `security_opt: no-new-privileges:true`
-- [ ] Drop all capabilities unless explicitly required.
-- [ ] Bind service to private interface only.
+- [x] Internal-network deployment example.
+- [x] Read-only root fs.
+- [x] `tmpfs` mounts for writable paths.
+- [x] `security_opt: no-new-privileges:true`
+- [x] Drop all capabilities unless explicitly required.
+- [x] Bind service to private interface only.
 
 ### `docs/ADVANCED_USAGE.md`
-- [ ] Add operational guidance:
-  - [ ] token/blacklist/state volume behavior under concurrency
-  - [ ] single-replica default unless shared-state strategy is explicit
-  - [ ] auth token rotation and log hygiene
+- [x] Add operational guidance:
+  - [x] token/blacklist/state volume behavior under concurrency
+  - [x] single-replica default unless shared-state strategy is explicit
+  - [x] auth token rotation and log hygiene
 
 ## Phase 5: Merge Readiness (`docker` -> `main`)
 
 ### Validation gates
 - [x] `py tools/release.py preflight` passes.
-- [ ] Container build job green.
+- [x] Container build job green.
 - [x] API unit tests green.
-- [ ] GHCR publish tested on tag/manual trigger.
-- [ ] Basic private-network smoke test completed.
+- [x] GHCR publish tested on tag/manual trigger.
+- [x] Basic private-network smoke test completed.
 
 ### Git workflow
 - [x] Keep Docker work isolated on `docker`.
