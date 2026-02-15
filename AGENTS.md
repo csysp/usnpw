@@ -1,9 +1,9 @@
 # AGENTS.md
 ## We do not encourage any kind of nefarious activity or crime using this or any software created or owned by us. You are fully responsible for your actions.
 ## Human Written "Project Vision" Context
-This is a personal project that began with an simple need to generate cryptgraphically sound passwords quickly from CLI for iterative testing purposes(Pw).  
+This is a personal project that began with a simple need to generate cryptographically sound passwords quickly from CLI for iterative testing purposes (Pw).  
 A second small project, the "OPSEC Username Generator (USn)" was added later to complement the password generation. Once combined they form a powerful opsec tool for mass deployments or single use generations.
-This project is currently a few .py scripts for interal use and iteration but will be expanded intoa GUI app in the future.
+This project is currently a few .py scripts for internal use and iteration but will be expanded into a GUI app in the future.
 Once completed, USnPw will function as a fully fledged "sensitive use" OPESEC account name and password creator, with deep anti-fingerprinting, anti-deterministic username generations across thousands of name generations. 
 Password generation included randomness (derived from os.urandom) hashing and encoding processes including hex, base64/base64url, crock32/crock32check, base58/base58check, uuid, sha256, blake2b, and even bip39 with only english supported currently. 
 
@@ -72,17 +72,20 @@ Prioritize OPSEC and anti-fingerprinting over everything else.
 - Bloat: remove dead code and avoid duplicate pathways.
 
 ## Validation Minimum
-- `py -m py_compile pwgen.py`
-- `py -m py_compile opsec_username_gen.py`
+- `py -m py_compile scripts/pwgen.py`
+- `py -m py_compile scripts/opsec_username_gen.py`
+- `py -m py_compile scripts/usnpw_api.py`
+- `py -m py_compile scripts/usnpw_gui.py`
 - `py -m py_compile usnpw/core/password_engine.py usnpw/core/username_engine.py`
 - `py -m py_compile usnpw/core/models.py usnpw/core/password_service.py usnpw/core/username_service.py usnpw/core/export_crypto.py`
 - `py -m py_compile usnpw/core/services.py`
 - `py -m py_compile usnpw/cli/pwgen_cli.py usnpw/cli/opsec_username_cli.py`
-- `py -m py_compile usnpw/gui/adapters.py usnpw/gui/app.py usnpw_gui.py`
+- `py -m py_compile usnpw/gui/adapters.py usnpw/gui/app.py scripts/usnpw_gui.py`
 - `py -m unittest tests/test_core_smoke.py`
 - `py -m unittest tests/test_service_layer.py`
 - `py -m unittest tests/test_gui_adapters.py`
 - `py -m unittest tests/test_export_crypto.py`
+- Optional (quick robustness pass): `py .\tools\fuzz_gui_adapters.py --iterations 20000 --seed 1`
 - Run sample generation in each supported mode and at least two platform profiles.
 
 ## Phase 4 Release Ops
@@ -94,6 +97,13 @@ Prioritize OPSEC and anti-fingerprinting over everything else.
 - `py .\tools\release.py all --with-binaries` for source + host-native binary release prep.
 - CI matrix workflow: `.github/workflows/ci-matrix.yml` (Windows/Linux/macOS preflight + native binaries).
 - Release workflow: `.github/workflows/release-artifacts.yml` (tag/manual source + binary artifacts).
+- Signing:
+  - GPG signatures for `*.sha256` sidecars are produced by CI (requires repo secrets `USNPW_GPG_PRIVATE_KEY` and optional `USNPW_GPG_PASSPHRASE`).
+  - GHCR container images are cosign-signed by CI on tag publishes.
+
+## Local-Only Notes
+- Keep sensitive/operator notes out of git history (ex: `Github Audit For Agent.md`).
+- Prefer `.git/info/exclude` for local-only ignore rules to avoid changing repo policy.
 
 ## Future Additions
 - "Red Team" anti-anti-fingerprinting tool
