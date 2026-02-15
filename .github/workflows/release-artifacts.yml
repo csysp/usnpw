@@ -69,3 +69,54 @@ jobs:
           path: |
             dist/bin/UsnPw*
             dist/bin/*.sha256
+
+  sign:
+    name: Sign Checksums (Optional)
+    needs:
+      - source
+      - binaries
+    runs-on: ubuntu-latest
+    if: ${{ secrets.USNPW_GPG_PRIVATE_KEY != '' }}
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Import GPG key
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "${{ secrets.USNPW_GPG_PRIVATE_KEY }}" | gpg --batch --import
+          gpg --armor --export > artifacts/usnpw-release-publickey.asc
+
+      - name: Sign *.sha256 sidecars
+        shell: bash
+        env:
+          USNPW_GPG_PASSPHRASE: ${{ secrets.USNPW_GPG_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          mapfile -t files < <(find artifacts -type f -name '*.sha256' | sort)
+          if [[ ${#files[@]} -eq 0 ]]; then
+            echo "No .sha256 files found under artifacts/"
+            exit 1
+          fi
+
+          for f in "${files[@]}"; do
+            if [[ -n "${USNPW_GPG_PASSPHRASE:-}" ]]; then
+              printf '%s' "$USNPW_GPG_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 \
+                --detach-sign --armor -o "${f}.asc" "${f}"
+            else
+              gpg --batch --yes --detach-sign --armor -o "${f}.asc" "${f}"
+            fi
+          done
+
+      - name: Upload signatures
+        uses: actions/upload-artifact@v4
+        with:
+          name: UsnPw-signatures
+          if-no-files-found: error
+          path: |
+            artifacts/**/*.sha256.asc
+            artifacts/usnpw-release-publickey.asc
