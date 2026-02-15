@@ -9,7 +9,7 @@
 - `docs/ARCHITECTURE.md`: module boundaries and reusable API shape
 - `docs/DOCKER_CHECKLIST.md`: phased Docker/GHCR implementation checklist
 - `docs/PERFORMANCE.md`: baseline performance notes and bench script
-- `docs/RELEASE_SIGNING.md`: optional signing for release artifacts and containers
+- `docs/RELEASE_SIGNING.md`: signing for release artifacts and containers
 - `docs/STREAM_STATE.md`: stream uniqueness state, persistence behavior, and recovery
 
 ## Project Policy

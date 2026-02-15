@@ -76,7 +76,7 @@ python3 ./scripts/usnpw_gui.py
 - `docs/ARCHITECTURE.md`: module boundaries and API model
 - `docs/DOCKER_CHECKLIST.md`: phased Docker/GHCR implementation plan
 - `docs/PERFORMANCE.md`: baseline performance notes and bench script
-- `docs/RELEASE_SIGNING.md`: optional signing for release artifacts and containers
+- `docs/RELEASE_SIGNING.md`: signing for release artifacts and containers
 - `docs/STREAM_STATE.md`: stream-state persistence behavior and recovery
 - `docs/INDEX.md`: docs map
 - `CONTRIBUTING.md`: contribution workflow

@@ -5,7 +5,7 @@ USnPw ships SHA-256 checksum sidecars for release artifacts. CI also produces de
 ## GPG Signatures For Checksum Sidecars
 
 ### What CI Produces
-When enabled, CI signs every `*.sha256` file produced by `tools/release.py` and uploads:
+CI signs every `*.sha256` file produced by `tools/release.py` and uploads:
 - `*.sha256.asc` (detached ASCII-armored signatures)
 - `usnpw-release-publickey.asc` (public key used for verification)
 
