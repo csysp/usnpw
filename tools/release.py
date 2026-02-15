@@ -23,13 +23,22 @@ COMPILE_ROOTS: tuple[str, ...] = ("scripts", "usnpw", "tools")
 TESTS_ROOT = ROOT / "tests"
 
 RELEASE_GLOBS: tuple[str, ...] = (
-    "README.md",
     "AGENTS.md",
+    "CODE_OF_CONDUCT.md",
+    "CONTRIBUTING.md",
+    "Dockerfile",
+    "LICENSE",
+    "README.md",
+    "SECURITY.md",
+    ".dockerignore",
+    ".github/workflows/*.yml",
     "bip39_english.txt",
+    "docker-compose*.yml",
+    "docs/**/*.md",
     "scripts/**/*.py",
     "usnpw/**/*.py",
     "tests/**/*.py",
-    "tools/release.py",
+    "tools/*.py",
 )
 
 
