@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Mapping, Tuple
+from typing import Mapping, Tuple
 
 from usnpw.core.models import (
     DEFAULT_USERNAME_BLACKLIST,
@@ -18,7 +18,7 @@ from usnpw.core.models import (
     UsernameRequest,
 )
 
-SAFE_MODE_LOCKED_VALUES: dict[str, Any] = {
+SAFE_MODE_LOCKED_VALUES: dict[str, object] = {
     "uniqueness_mode": USERNAME_DEFAULT_UNIQUENESS_MODE,
     "no_save": USERNAME_DEFAULT_NO_SAVE,
     "no_token_save": USERNAME_DEFAULT_NO_TOKEN_SAVE,
@@ -88,7 +88,7 @@ def is_unusual_delete_target(path: Path, label: str) -> bool:
     return True
 
 
-def build_password_request(fields: Mapping[str, Any]) -> PasswordRequest:
+def build_password_request(fields: Mapping[str, object]) -> PasswordRequest:
     return PasswordRequest(
         count=parse_int(str(fields.get("count", "1")), "count"),
         length=parse_int(str(fields.get("length", "20")), "length"),
@@ -109,7 +109,7 @@ def build_password_request(fields: Mapping[str, Any]) -> PasswordRequest:
     )
 
 
-def build_username_request(fields: Mapping[str, Any]) -> UsernameRequest:
+def build_username_request(fields: Mapping[str, object]) -> UsernameRequest:
     return UsernameRequest(
         count=parse_int(str(fields.get("count", "10")), "count"),
         min_len=parse_int(str(fields.get("min_len", "8")), "min-len"),
