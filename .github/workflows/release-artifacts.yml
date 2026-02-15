@@ -79,9 +79,11 @@ jobs:
     steps:
       - name: Ensure GPG signing key is configured
         shell: bash
+        env:
+          USNPW_GPG_PRIVATE_KEY: ${{ secrets.USNPW_GPG_PRIVATE_KEY }}
         run: |
           set -euo pipefail
-          if [[ -z "${{ secrets.USNPW_GPG_PRIVATE_KEY }}" ]]; then
+          if [[ -z "${USNPW_GPG_PRIVATE_KEY}" ]]; then
             echo "::error::Missing USNPW_GPG_PRIVATE_KEY secret. Configure it to sign release checksums."
             exit 1
           fi
@@ -94,9 +96,17 @@ jobs:
       - name: Import GPG key
         id: gpg
         shell: bash
+        env:
+          GNUPGHOME: ${{ runner.temp }}/gnupg
+          USNPW_GPG_PRIVATE_KEY: ${{ secrets.USNPW_GPG_PRIVATE_KEY }}
         run: |
           set -euo pipefail
-          echo "${{ secrets.USNPW_GPG_PRIVATE_KEY }}" | gpg --batch --import
+          mkdir -p "$GNUPGHOME"
+          chmod 700 "$GNUPGHOME"
+          echo "allow-loopback-pinentry" >> "$GNUPGHOME/gpg-agent.conf"
+          gpgconf --kill gpg-agent || true
+
+          printf '%s' "$USNPW_GPG_PRIVATE_KEY" | gpg --batch --import
           key_id="$(gpg --batch --list-secret-keys --with-colons | awk -F: '$1=="fpr" {print $10; exit}')"
           if [[ -z "$key_id" ]]; then
             echo "::error::No secret key available after import."
@@ -108,6 +118,7 @@ jobs:
       - name: Sign *.sha256 sidecars
         shell: bash
         env:
+          GNUPGHOME: ${{ runner.temp }}/gnupg
           USNPW_GPG_PASSPHRASE: ${{ secrets.USNPW_GPG_PASSPHRASE }}
         run: |
           set -euo pipefail
