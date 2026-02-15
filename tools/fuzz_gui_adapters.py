@@ -4,6 +4,12 @@ import argparse
 import random
 import string
 import sys
+from pathlib import Path
+
+# Allow running as `py .\\tools\\fuzz_gui_adapters.py` without installing the package.
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from usnpw.gui.adapters import build_password_request, build_username_request
 
@@ -113,4 +119,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

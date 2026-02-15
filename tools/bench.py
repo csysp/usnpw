@@ -1,7 +1,14 @@
 from __future__ import annotations
 
 import argparse
+import sys
 import time
+from pathlib import Path
+
+# Allow running as `py .\\tools\\bench.py` without installing the package.
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from usnpw.core.models import PasswordRequest, UsernameRequest
 from usnpw.core.password_service import generate_passwords
@@ -13,8 +20,8 @@ def _bench_passwords(count: int, length: int) -> None:
     t0 = time.perf_counter()
     result = generate_passwords(req)
     dt = time.perf_counter() - t0
-    rate = (len(result.passwords) / dt) if dt > 0 else 0.0
-    print(f"[passwords] count={len(result.passwords)} length={length} seconds={dt:.4f} rate={rate:.1f}/s")
+    rate = (len(result.outputs) / dt) if dt > 0 else 0.0
+    print(f"[passwords] count={len(result.outputs)} length={length} seconds={dt:.4f} rate={rate:.1f}/s")
 
 
 def _bench_usernames(count: int, profile: str, uniqueness_mode: str) -> None:
@@ -70,4 +77,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
