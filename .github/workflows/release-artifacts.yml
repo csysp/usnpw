@@ -97,7 +97,7 @@ jobs:
         run: |
           set -euo pipefail
           echo "${{ secrets.USNPW_GPG_PRIVATE_KEY }}" | gpg --batch --import
-          key_id="$(gpg --batch --list-secret-keys --with-colons | awk -F: '$1==\"fpr\" {print $10; exit}')"
+          key_id="$(gpg --batch --list-secret-keys --with-colons | awk -F: '$1=="fpr" {print $10; exit}')"
           if [[ -z "$key_id" ]]; then
             echo "::error::No secret key available after import."
             exit 1
