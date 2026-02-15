@@ -71,13 +71,21 @@ jobs:
             dist/bin/*.sha256
 
   sign:
-    name: Sign Checksums (Optional)
+    name: Sign Checksums
     needs:
       - source
       - binaries
     runs-on: ubuntu-latest
-    if: ${{ secrets.USNPW_GPG_PRIVATE_KEY != '' }}
     steps:
+      - name: Ensure GPG signing key is configured
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${{ secrets.USNPW_GPG_PRIVATE_KEY }}" ]]; then
+            echo "::error::Missing USNPW_GPG_PRIVATE_KEY secret. Configure it to sign release checksums."
+            exit 1
+          fi
+
       - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:

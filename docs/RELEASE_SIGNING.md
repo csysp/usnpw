@@ -1,6 +1,6 @@
-# Release Signing (Optional)
+# Release Signing
 
-USnPw ships SHA-256 checksum sidecars for release artifacts. Optionally, CI can also produce detached GPG signatures for those checksum files and sign container images.
+USnPw ships SHA-256 checksum sidecars for release artifacts. CI also produces detached GPG signatures for those checksum files and signs published container images.
 
 ## GPG Signatures For Checksum Sidecars
 
@@ -20,7 +20,7 @@ Create repository secrets:
 - `USNPW_GPG_PRIVATE_KEY`: ASCII-armored private key (exported for CI signing)
 - `USNPW_GPG_PASSPHRASE`: optional (only if the key is passphrase-protected)
 
-The signing job is skipped if `USNPW_GPG_PRIVATE_KEY` is not set.
+The release workflow fails if `USNPW_GPG_PRIVATE_KEY` is not set.
 
 ### Verify As A Consumer
 1. Import the public key from the release workflow output:
@@ -34,14 +34,14 @@ The signing job is skipped if `USNPW_GPG_PRIVATE_KEY` is not set.
 ## Container Image Signing (cosign keyless)
 
 ### What CI Does
-When enabled, CI signs the published image digest using keyless signing (GitHub Actions OIDC).
+CI signs the published image digest using keyless signing (GitHub Actions OIDC).
 
 Workflow:
 - `.github/workflows/container-ghcr.yml`
 
-Enablement:
-- Manual `workflow_dispatch`: set `sign=true`.
-- Tag builds: set repository variable `USNPW_COSIGN_SIGN=true`.
+Notes:
+- Manual `workflow_dispatch`: `sign` defaults to `true` (set `sign=false` to skip).
+- Tag publishes sign by default.
 
 ### Verification Notes
 Keyless verification uses the signing certificate claims (OIDC issuer and identity). Consumers should verify:
