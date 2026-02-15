@@ -1,4 +1,5 @@
 # USnPw
+[![Release Artifacts](https://github.com/csysp/UsnPw/actions/workflows/release-artifacts.yml/badge.svg)](https://github.com/csysp/UsnPw/actions/workflows/release-artifacts.yml)
 
 Local-first, stdlib-only tooling for secure password generation and OPSEC-focused username generation.
 
