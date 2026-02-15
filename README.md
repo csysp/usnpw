@@ -75,9 +75,11 @@ python3 ./scripts/usnpw_gui.py
 - `docs/ADVANCED_USAGE.md`: advanced tuning, OPSEC tradeoffs, and troubleshooting
 - `docs/ARCHITECTURE.md`: module boundaries and API model
 - `docs/DOCKER_CHECKLIST.md`: phased Docker/GHCR implementation plan
+- `docs/STREAM_STATE.md`: stream-state persistence behavior and recovery
 - `docs/INDEX.md`: docs map
 - `CONTRIBUTING.md`: contribution workflow
 - `SECURITY.md`: vulnerability reporting policy
+- `THREAT_MODEL.md`: security goals, non-goals, and threat model
 
 ## Programmatic API
 ```python

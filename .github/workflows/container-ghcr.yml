@@ -15,7 +15,7 @@ on:
       publish:
         description: "Publish image to GHCR"
         required: true
-        default: true"
+        default: "true"
         type: choice
         options:
           - "false"

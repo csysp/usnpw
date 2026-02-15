@@ -15,6 +15,7 @@ import base64
 import hashlib
 import os
 import uuid
+from pathlib import Path
 
 
 # ---------------- Password mode (unbiased selection) ----------------
@@ -157,10 +158,49 @@ def group_string(s: str, size: int, sep: str = "-", pad_char: str = "") -> str:
 # ---------------- BIP39 (requires wordlist file) ----------------
 
 def load_bip39_wordlist(path: str) -> list[str]:
-    with open(path, "r", encoding="utf-8") as f:
-        words = [line.strip() for line in f if line.strip()]
+    p = Path(path).expanduser()
+    try:
+        st = p.stat()
+    except FileNotFoundError as exc:
+        raise ValueError(f"BIP39 wordlist file not found: {p}") from exc
+    except OSError as exc:
+        raise ValueError(f"Unable to stat BIP39 wordlist file '{p}': {exc}") from exc
+
+    if not p.is_file():
+        raise ValueError(f"BIP39 wordlist path is not a file: {p}")
+
+    # Prevent pathological inputs (BIP39 wordlists are small).
+    if st.st_size > 512 * 1024:
+        raise ValueError(f"BIP39 wordlist file too large: {p} ({st.st_size} bytes)")
+
+    try:
+        text = p.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        raise ValueError(f"Unable to read BIP39 wordlist file '{p}': {exc}") from exc
+
+    words: list[str] = []
+    seen: set[str] = set()
+    dupes: list[str] = []
+    for raw_line in text.splitlines():
+        w = raw_line.strip()
+        if not w:
+            continue
+        # Tolerate UTF-8 BOM if present at file start.
+        w = w.lstrip("\ufeff")
+        if any(ch.isspace() for ch in w):
+            raise ValueError(f"Invalid BIP39 word contains whitespace: {w!r}")
+        if len(w) > 64:
+            raise ValueError(f"Invalid BIP39 word too long: {w!r}")
+        words.append(w)
+        if w in seen and w not in dupes:
+            dupes.append(w)
+        seen.add(w)
+
     if len(words) != 2048:
         raise ValueError(f"BIP39 wordlist must have 2048 words, got {len(words)}")
+    if dupes:
+        sample = ", ".join(repr(w) for w in dupes[:5])
+        raise ValueError(f"BIP39 wordlist must contain 2048 unique words; found duplicates (sample): {sample}")
     return words
 
 
