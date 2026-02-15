@@ -39,10 +39,13 @@ When enabled, CI signs the published image digest using keyless signing (GitHub 
 Workflow:
 - `.github/workflows/container-ghcr.yml`
 
+Enablement:
+- Manual `workflow_dispatch`: set `sign=true`.
+- Tag builds: set repository variable `USNPW_COSIGN_SIGN=true`.
+
 ### Verification Notes
 Keyless verification uses the signing certificate claims (OIDC issuer and identity). Consumers should verify:
 - the OIDC issuer is GitHub Actions (`https://token.actions.githubusercontent.com`)
 - the certificate identity matches the expected repository/workflow
 
 Exact verification commands depend on your environment and policy. If you need a pinned verification policy, add it to your deployment documentation and treat it as a security boundary.
-
