@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import tempfile
-import tkinter as tk
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -16,7 +15,20 @@ from usnpw.core.models import (
     USERNAME_DEFAULT_POOL_SCALE,
     USERNAME_DEFAULT_UNIQUENESS_MODE,
 )
-from usnpw.gui.app import USnPwApp
+
+_GUI_TEST_SKIP_REASON = ""
+
+try:
+    import tkinter as tk
+    from usnpw.gui.app import USnPwApp
+except ImportError as exc:
+    msg = str(exc).lower()
+    if "tkinter" in msg or "_tkinter" in msg:
+        tk = None  # type: ignore[assignment]
+        USnPwApp = None  # type: ignore[assignment]
+        _GUI_TEST_SKIP_REASON = f"Tkinter GUI dependencies unavailable: {exc}"
+    else:
+        raise
 
 
 class _Var:
@@ -46,6 +58,7 @@ class _Widget:
         self.config.update(kwargs)
 
 
+@unittest.skipIf(bool(_GUI_TEST_SKIP_REASON), _GUI_TEST_SKIP_REASON)
 class GuiAppSafetyTests(unittest.TestCase):
     def test_copy_guard_requires_prompt_when_enabled(self) -> None:
         dummy = type("Dummy", (), {})()
