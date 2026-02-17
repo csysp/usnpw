@@ -165,21 +165,54 @@ jobs:
 
       - name: Collect release files
         id: collect
-        shell: bash
+        shell: python
         run: |
-          set -euo pipefail
-          shopt -s nullglob
-          mapfile -t files < <(find artifacts -type f | sort)
-          if [[ ${#files[@]} -eq 0 ]]; then
-            echo "::error::No release files found under artifacts/"
-            exit 1
-          fi
+          from pathlib import Path
+          import os
 
-          {
-            echo "files<<EOF"
-            printf '%s\n' "${files[@]}"
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
+          root = Path("artifacts")
+          if not root.is_dir():
+              print("::error::Missing artifacts/ directory.")
+              raise SystemExit(1)
+
+          app_dirs = sorted(p for p in root.rglob("*.app") if p.is_dir())
+          if app_dirs:
+              print("::error::Found .app directory bundles in artifacts. "
+                    "Raw release publishing does not support directory assets.")
+              for app_dir in app_dirs:
+                  print(f"::error::unsupported bundle: {app_dir.as_posix()}")
+              raise SystemExit(1)
+
+          selected_by_name: dict[str, Path] = {}
+          for path in sorted(root.rglob("*")):
+              if not path.is_file():
+                  continue
+              name = path.name
+              if not name.startswith("usnpw"):
+                  continue
+              previous = selected_by_name.get(name)
+              if previous is not None and previous != path:
+                  print(f"::error::Duplicate release asset name '{name}'")
+                  print(f"::error::  first:  {previous.as_posix()}")
+                  print(f"::error::  second: {path.as_posix()}")
+                  raise SystemExit(1)
+              selected_by_name[name] = path
+
+          files = [p.as_posix() for _, p in sorted(selected_by_name.items())]
+          if not files:
+              print("::error::No release files discovered in artifacts/ (expected usnpw* files).")
+              raise SystemExit(1)
+
+          output_path = os.environ.get("GITHUB_OUTPUT", "")
+          if not output_path:
+              print("::error::GITHUB_OUTPUT is not set.")
+              raise SystemExit(1)
+
+          with Path(output_path).open("a", encoding="utf-8") as handle:
+              handle.write("files<<EOF\n")
+              for file_path in files:
+                  handle.write(f"{file_path}\n")
+              handle.write("EOF\n")
 
       - name: Publish release assets
         uses: softprops/action-gh-release@v2
