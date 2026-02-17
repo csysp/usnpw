@@ -74,12 +74,13 @@ Prioritize OPSEC and anti-fingerprinting over everything else.
 ## Validation Minimum
 - `py -m py_compile scripts/pwgen.py`
 - `py -m py_compile scripts/opsec_username_gen.py`
+- `py -m py_compile scripts/usnpw_cli.py`
 - `py -m py_compile scripts/usnpw_api.py`
 - `py -m py_compile scripts/usnpw_gui.py`
 - `py -m py_compile usnpw/core/password_engine.py usnpw/core/username_generation.py usnpw/core/username_lexicon.py usnpw/core/username_schemes.py usnpw/core/username_storage.py usnpw/core/username_stream_state.py usnpw/core/username_uniqueness.py usnpw/core/username_policies.py`
 - `py -m py_compile usnpw/core/models.py usnpw/core/password_service.py usnpw/core/username_service.py usnpw/core/export_crypto.py`
 - `py -m py_compile usnpw/core/services.py`
-- `py -m py_compile usnpw/cli/pwgen_cli.py usnpw/cli/opsec_username_cli.py`
+- `py -m py_compile usnpw/cli/pwgen_cli.py usnpw/cli/opsec_username_cli.py usnpw/cli/usnpw_cli.py usnpw/__main__.py`
 - `py -m py_compile usnpw/gui/adapters.py usnpw/gui/app.py scripts/usnpw_gui.py`
 - `py -m unittest tests/test_core_smoke.py`
 - `py -m unittest tests/test_service_layer.py`
@@ -90,11 +91,13 @@ Prioritize OPSEC and anti-fingerprinting over everything else.
 
 ## Phase 4 Release Ops
 - `py .\tools\release.py preflight` for compile + unit-test gate.
-- `py .\tools\release.py bundle` to build a timestamped source artifact in `.\dist\`.
+- `py .\tools\release.py bundle` to build a timestamped source artifact (`usnpw-source-<stamp>.zip`) in `.\dist\`.
 - `py .\tools\release.py checksums --artifact <zip>` to write a SHA-256 sidecar.
-- `py .\tools\release.py binaries` to build the default GUI binary (`UsnPw.(ext)`) on the host OS (requires PyInstaller on that host).
+- `py .\tools\release.py binaries` to build default host-native binaries (`usnpw-<platform>-gui` + `usnpw-cli`).
+- `py .\tools\release.py install-cli` to install the CLI command (`usnpw`) into a user-local bin and persist PATH.
 - `py .\tools\release.py all` for end-to-end source release prep.
 - `py .\tools\release.py all --with-binaries` for source + host-native binary release prep.
+- Binary builds are pinned to `pyinstaller==6.16.0`; release commands hard-fail on version mismatch.
 - CI matrix workflow: `.github/workflows/ci-matrix.yml` (Windows/Linux/macOS preflight + native binaries).
 - Release workflow: `.github/workflows/release-artifacts.yml` (tag/manual source + binary artifacts).
 - Signing:

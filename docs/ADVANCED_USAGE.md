@@ -12,8 +12,8 @@ For install/setup, use `docs/SETUP.md`.
 - Windows examples use `py .\scripts\...`
 - Linux/macOS equivalents use `python3 ./scripts/...`
 - Unified wrapper:
-1. password mode is default (`usnpw -n 5 -l 24`)
-2. username mode uses `username` subcommand (`usnpw username -n 20 --profile reddit`)
+  - password mode is default (`usnpw -n 5 -l 24`)
+  - username mode uses `username` subcommand (`usnpw username -n 20 --profile reddit`)
 
 ## Username Generation: Operating Strategy
 

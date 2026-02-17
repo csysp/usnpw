@@ -284,7 +284,7 @@ Get-Command usnpw | Select-Object -ExpandProperty Source
 Then reinstall from the current build and restart the shell:
 
 ```powershell
-py .\tools\release.py binaries --target cli
+py .\tools\release.py binaries
 py .\tools\release.py install-cli
 ```
 

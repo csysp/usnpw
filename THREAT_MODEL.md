@@ -3,7 +3,7 @@
 Last updated: 2026-02-15
 
 This document describes the threat model for USnPw across:
-- CLI (`scripts/pwgen.py`, `scripts/opsec_username_gen.py`)
+- CLI (`scripts/usnpw_cli.py`, `scripts/pwgen.py`, `scripts/opsec_username_gen.py`)
 - GUI (`scripts/usnpw_gui.py`)
 - API server (`scripts/usnpw_api.py`, `usnpw/api/*`)
 - Container distribution (GHCR image)
@@ -113,4 +113,3 @@ USnPw GUI provides three safety layers:
 - Persisted token/username ledgers can leak operational patterns if exfiltrated.
 - Stream state reset/rotation changes uniqueness guarantees across runs.
 - Exposing the API port to untrusted networks without a reverse proxy and network ACLs increases risk.
-
