@@ -1,6 +1,6 @@
 services:
   usnpw:
-    image: ghcr.io/csysp/usnpw:latest
+    image: ${USNPW_IMAGE:-usnpw:latest}
     restart: unless-stopped
     read_only: true
     tmpfs:

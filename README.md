@@ -1,7 +1,4 @@
 # USnPw
-[![Release Artifacts](https://github.com/csysp/UsnPw/actions/workflows/release-artifacts.yml/badge.svg)](https://github.com/csysp/UsnPw/actions/workflows/release-artifacts.yml)
-[![Container GHCR](https://github.com/csysp/UsnPw/actions/workflows/container-ghcr.yml/badge.svg)](https://github.com/csysp/UsnPw/actions/workflows/container-ghcr.yml)
-[![CodeQL](https://github.com/csysp/UsnPw/actions/workflows/github-code-scanning/codeql/badge.svg)](https://github.com/csysp/UsnPw/actions/workflows/github-code-scanning/codeql)
 
 USnPw combines two high-friction security tasks into one auditable toolchain: generating strong secrets and generating profile-aware usernames that avoid predictable output signatures. It is designed for operators, developers, and security teams who need fast generation at scale without handing sensitive workflows to cloud services.
 The project pairs hardened defaults with practical usability: a unified CLI, a thin GUI over the same service layer,and release artifacts you can verify with checksums and signatures. No telemetry, no background network calls, and no dependency bloat.

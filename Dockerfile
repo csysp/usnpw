@@ -29,8 +29,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 LABEL org.opencontainers.image.title="UsnPw" \
-      org.opencontainers.image.description="Local-first OPSEC username and password generation toolkit" \
-      org.opencontainers.image.source="https://github.com/csysp/UsnPw"
+      org.opencontainers.image.description="Local-first OPSEC username and password generation toolkit"
 
 RUN groupadd --system usnpw \
     && useradd --system --gid usnpw --uid 10001 --home-dir /nonexistent --shell /usr/sbin/nologin usnpw
