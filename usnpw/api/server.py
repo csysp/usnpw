@@ -7,6 +7,7 @@ import json
 import os
 import socket
 import ssl
+import stat
 import sys
 import threading
 import time
@@ -41,6 +42,7 @@ DEFAULT_REQUEST_QUEUE_SIZE = 256
 DEFAULT_AUTH_TRACKED_KEYS_MAX = 8192
 DEFAULT_AUTH_CLEANUP_INTERVAL_SECONDS = 30.0
 DEFAULT_MIN_TOKEN_LENGTH = 24
+DEFAULT_MAX_TOKEN_FILE_BYTES = 16 * 1024
 DEFAULT_MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 KNOWN_ENDPOINT_METHODS: dict[str, tuple[str, ...]] = {
     "/healthz": ("GET",),
@@ -117,6 +119,14 @@ def _is_loopback_host(host: str) -> bool:
         return ipaddress.ip_address(raw).is_loopback
     except ValueError:
         return False
+
+
+def _is_visible_ascii(text: str) -> bool:
+    for ch in text:
+        code = ord(ch)
+        if code < 33 or code > 126:
+            return False
+    return True
 
 
 class AuthThrottle:
@@ -454,24 +464,50 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
 
 def _read_token_file(path: str) -> str:
     token_path = Path(path).expanduser()
-    if not token_path.is_file():
-        raise ValueError(f"token file not found: {token_path}")
-    if os.name != "nt":
+    flags = os.O_RDONLY
+    if os.name != "nt" and hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        fd = os.open(str(token_path), flags)
+    except FileNotFoundError as exc:
+        raise ValueError(f"token file not found: {token_path}") from exc
+    except OSError as exc:
+        raise ValueError(f"unable to open token file '{token_path}': {exc}") from exc
+    try:
         try:
-            st = token_path.stat()
+            st = os.fstat(fd)
         except OSError as exc:
             raise ValueError(f"unable to stat token file '{token_path}': {exc}") from exc
-        if st.st_mode & 0o077:
-            raise ValueError(
-                f"token file permissions are too broad: {token_path}. "
-                "Use owner-only permissions (chmod 600)."
-            )
-        if hasattr(os, "geteuid") and st.st_uid != os.geteuid():
-            raise ValueError(f"token file must be owned by the current user: {token_path}")
-    try:
-        token = token_path.read_text(encoding="utf-8").strip()
-    except OSError as exc:
-        raise ValueError(f"unable to read token file '{token_path}': {exc}") from exc
+        if not stat.S_ISREG(st.st_mode):
+            raise ValueError(f"token file must be a regular file: {token_path}")
+        if os.name != "nt":
+            if st.st_mode & 0o077:
+                raise ValueError(
+                    f"token file permissions are too broad: {token_path}. "
+                    "Use owner-only permissions (chmod 600)."
+                )
+            if hasattr(os, "geteuid") and st.st_uid != os.geteuid():
+                raise ValueError(f"token file must be owned by the current user: {token_path}")
+        data = bytearray()
+        while True:
+            chunk = os.read(fd, 4096)
+            if not chunk:
+                break
+            data.extend(chunk)
+            if len(data) > DEFAULT_MAX_TOKEN_FILE_BYTES:
+                raise ValueError(
+                    f"token file is too large: {token_path} "
+                    f"(max {DEFAULT_MAX_TOKEN_FILE_BYTES} bytes)"
+                )
+        try:
+            token = bytes(data).decode("utf-8").strip()
+        except UnicodeDecodeError as exc:
+            raise ValueError(f"token file must be valid UTF-8 text: {token_path}") from exc
+    finally:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
     if not token:
         raise ValueError(f"token file is empty: {token_path}")
     return token
@@ -486,6 +522,10 @@ def _validate_api_config(config: APIConfig) -> None:
         raise ValueError(
             f"token must be at least {DEFAULT_MIN_TOKEN_LENGTH} characters; use a random 32+ character token"
         )
+    if any(ch.isspace() for ch in config.token):
+        raise ValueError("token must not contain whitespace")
+    if not _is_visible_ascii(config.token):
+        raise ValueError("token must use visible ASCII characters only")
     if config.port < 0:
         raise ValueError("port must be >= 0")
     if config.max_body_bytes <= 0:

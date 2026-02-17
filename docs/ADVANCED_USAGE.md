@@ -155,6 +155,7 @@ For load-abuse resistance, keep per-client concurrency and request-rate controls
 - Prefer `USNPW_API_TOKEN_FILE` for secret injection.
 - `USNPW_API_TOKEN` and CLI token flags are opt-in and disabled by default.
 - API tokens must meet a minimum length requirement (`24` characters).
+- API tokens must be visible ASCII and may not contain whitespace.
 - On POSIX, token files should use owner-only permissions (`chmod 600`).
 - Auth-failure throttling keys are composite and route-aware to resist token spray patterns.
 

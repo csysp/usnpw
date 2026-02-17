@@ -5,6 +5,7 @@ import io
 import json
 import os
 import threading
+import time
 import unittest
 import urllib.error
 import urllib.request
@@ -36,6 +37,20 @@ class APIServerTests(unittest.TestCase):
             if isinstance(message, str):
                 return message
         return ""
+
+    @staticmethod
+    def _is_transient_transport_error(exc: BaseException) -> bool:
+        reason: object = exc
+        if isinstance(exc, urllib.error.URLError):
+            reason = exc.reason
+        if isinstance(reason, OSError):
+            winerror = getattr(reason, "winerror", None)
+            errno = getattr(reason, "errno", None)
+            if winerror in (10053, 10054):
+                return True
+            if errno in (103, 104):
+                return True
+        return False
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -102,13 +117,19 @@ class APIServerTests(unittest.TestCase):
             headers["Authorization"] = f"Bearer {token}"
 
         request = urllib.request.Request(url, data=body, headers=headers, method=method)
-        try:
-            with urllib.request.urlopen(request, timeout=5) as response:
-                data = response.read().decode("utf-8")
-                return response.status, json.loads(data), dict(response.headers.items())
-        except urllib.error.HTTPError as exc:
-            data = exc.read().decode("utf-8")
-            return exc.code, json.loads(data), dict(exc.headers.items())
+        for attempt in range(2):
+            try:
+                with urllib.request.urlopen(request, timeout=5) as response:
+                    data = response.read().decode("utf-8")
+                    return response.status, json.loads(data), dict(response.headers.items())
+            except urllib.error.HTTPError as exc:
+                data = exc.read().decode("utf-8")
+                return exc.code, json.loads(data), dict(exc.headers.items())
+            except (urllib.error.URLError, ConnectionResetError, ConnectionAbortedError, BrokenPipeError) as exc:
+                if attempt == 1 or not self._is_transient_transport_error(exc):
+                    raise
+                time.sleep(0.05)
+        raise RuntimeError("request retry loop exited unexpectedly")
 
     def test_healthz_is_open(self) -> None:
         status, payload = self._request("GET", "/healthz")
@@ -496,6 +517,70 @@ class APIServerTests(unittest.TestCase):
         finally:
             token_file.unlink(missing_ok=True)
 
+    def test_build_config_rejects_token_file_with_whitespace(self) -> None:
+        token_file = Path(".tmp_api_token_file_ws.txt")
+        try:
+            token_file.write_text(f"{LONG_TEST_TOKEN} bad\n", encoding="utf-8")
+            if os.name != "nt":
+                token_file.chmod(0o600)
+            args = argparse.Namespace(
+                host="127.0.0.1",
+                port=8080,
+                token="",
+                token_file=str(token_file),
+                max_body_bytes=1024,
+                max_password_count=10,
+                max_username_count=10,
+                max_concurrent_requests=32,
+                socket_timeout_seconds=5.0,
+                auth_fail_limit=5,
+                auth_fail_window_seconds=60,
+                auth_block_seconds=120,
+                request_rate_limit=240,
+                request_rate_window_seconds=10,
+                request_rate_block_seconds=30,
+                tls_cert_file="",
+                tls_key_file="",
+                allow_env_token=False,
+                allow_cli_token=False,
+            )
+            with self.assertRaisesRegex(ValueError, "token must not contain whitespace"):
+                _build_config(args)
+        finally:
+            token_file.unlink(missing_ok=True)
+
+    def test_build_config_rejects_oversize_token_file(self) -> None:
+        token_file = Path(".tmp_api_token_file_large.txt")
+        try:
+            token_file.write_text("a" * (17 * 1024), encoding="utf-8")
+            if os.name != "nt":
+                token_file.chmod(0o600)
+            args = argparse.Namespace(
+                host="127.0.0.1",
+                port=8080,
+                token="",
+                token_file=str(token_file),
+                max_body_bytes=1024,
+                max_password_count=10,
+                max_username_count=10,
+                max_concurrent_requests=32,
+                socket_timeout_seconds=5.0,
+                auth_fail_limit=5,
+                auth_fail_window_seconds=60,
+                auth_block_seconds=120,
+                request_rate_limit=240,
+                request_rate_window_seconds=10,
+                request_rate_block_seconds=30,
+                tls_cert_file="",
+                tls_key_file="",
+                allow_env_token=False,
+                allow_cli_token=False,
+            )
+            with self.assertRaisesRegex(ValueError, "token file is too large"):
+                _build_config(args)
+        finally:
+            token_file.unlink(missing_ok=True)
+
     def test_build_config_rejects_token_file_with_broad_permissions(self) -> None:
         if os.name == "nt":
             self.skipTest("POSIX-only token file permission check")
@@ -738,6 +823,32 @@ class APIServerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "token must be at least"):
             _build_config(args)
 
+    def test_build_config_rejects_cli_token_with_whitespace(self) -> None:
+        args = argparse.Namespace(
+            host="127.0.0.1",
+            port=8080,
+            token=f"{LONG_TEST_TOKEN} bad",
+            token_file="",
+            max_body_bytes=1024,
+            max_password_count=10,
+            max_username_count=10,
+            max_concurrent_requests=32,
+            max_concurrent_requests_per_client=8,
+            socket_timeout_seconds=5.0,
+            auth_fail_limit=5,
+            auth_fail_window_seconds=60,
+            auth_block_seconds=120,
+            request_rate_limit=240,
+            request_rate_window_seconds=10,
+            request_rate_block_seconds=30,
+            tls_cert_file="",
+            tls_key_file="",
+            allow_env_token=False,
+            allow_cli_token=True,
+        )
+        with self.assertRaisesRegex(ValueError, "token must not contain whitespace"):
+            _build_config(args)
+
     def test_create_server_rejects_short_token_when_config_is_constructed_directly(self) -> None:
         config = APIConfig(
             host="127.0.0.1",
@@ -748,6 +859,18 @@ class APIServerTests(unittest.TestCase):
             max_username_count=10,
         )
         with self.assertRaisesRegex(ValueError, "token must be at least"):
+            create_server(config)
+
+    def test_create_server_rejects_non_ascii_token_when_config_is_constructed_directly(self) -> None:
+        config = APIConfig(
+            host="127.0.0.1",
+            port=0,
+            token=f"{LONG_TEST_TOKEN}\u2603",
+            max_body_bytes=1024,
+            max_password_count=10,
+            max_username_count=10,
+        )
+        with self.assertRaisesRegex(ValueError, "visible ASCII"):
             create_server(config)
 
     def test_internal_error_returns_json_500(self) -> None:

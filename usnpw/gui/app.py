@@ -931,6 +931,10 @@ class USnPwApp(tk.Tk):
                 os.fsync(handle.fileno())
             os.replace(tmp_name, path)
             try:
+                os.chmod(path, 0o600)
+            except OSError:
+                pass
+            try:
                 dir_fd = os.open(str(path.parent), os.O_RDONLY)
             except OSError:
                 dir_fd = None
