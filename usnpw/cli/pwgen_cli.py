@@ -9,6 +9,7 @@ from usnpw.core.models import PasswordRequest
 from usnpw.core.password_engine import FORMAT_CHOICES, OUT_ENC_CHOICES
 from usnpw.core.password_service import generate_passwords
 
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Password / token generator using os.urandom")
 

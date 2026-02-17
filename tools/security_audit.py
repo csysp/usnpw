@@ -44,7 +44,26 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Local security audit runner (stdlib-only).")
     parser.add_argument("--fuzz-iterations", type=int, default=5000)
     parser.add_argument("--fuzz-seed", type=int, default=0)
+    parser.add_argument(
+        "--allow-ci",
+        action="store_true",
+        help="Allow running in CI environments (local-only by default).",
+    )
     args = parser.parse_args(argv)
+
+    ci_markers = (
+        os.environ.get("CI", ""),
+        os.environ.get("GITHUB_ACTIONS", ""),
+        os.environ.get("TF_BUILD", ""),
+        os.environ.get("BUILD_BUILDID", ""),
+    )
+    if not args.allow_ci and any(marker.strip() for marker in ci_markers):
+        print(
+            "[run] security audit is local-only; refusing to run in CI. "
+            "Use --allow-ci to override.",
+            file=sys.stderr,
+        )
+        return 2
 
     _print_env()
     _maybe_run_external_scanners()

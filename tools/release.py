@@ -59,7 +59,7 @@ BINARY_TARGETS: tuple[BinaryTarget, ...] = (
     BinaryTarget(
         key="cli",
         entrypoint="usnpw/cli/usnpw_cli.py",
-        output_base="usnpw-cli",
+        output_base="usnpw-{platform}-cli",
         collect_submodules=("usnpw.cli", "usnpw.core"),
     ),
     BinaryTarget(key="pwgen", entrypoint="scripts/pwgen.py", output_base="usnpw-pwgen"),

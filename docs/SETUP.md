@@ -4,7 +4,7 @@ This guide covers install and setup for Windows, Linux, and macOS in both source
 
 ## Install Modes
 1. Source mode: run the Python entrypoints directly.
-2. Binary mode: run labeled release artifacts (for example `usnpw-cli(.exe)`, `usnpw-<platform>-gui(.exe)`).
+2. Binary mode: run labeled release artifacts (for example `usnpw-<platform>-cli(.exe)`, `usnpw-<platform>-gui(.exe)`).
 
 ## Prerequisites
 - Python `3.9+` for source mode.
@@ -130,20 +130,20 @@ If that command fails, use a Python build with Tk support before running `script
 
 ## Binary Setup: Windows
 
-1. Download release artifacts for Windows.
+1. Download release artifacts for Windows (raw files; no extraction step required).
 2. Keep each binary with its checksum sidecar.
-3. For CLI installs, use `usnpw-cli.exe` and `usnpw-cli.exe.sha256`.
+3. For CLI installs, use `usnpw-windows-cli.exe` and `usnpw-windows-cli.exe.sha256`.
 4. Verify checksum:
 
 ```powershell
-Get-FileHash .\usnpw-cli.exe -Algorithm SHA256
-Get-Content .\usnpw-cli.exe.sha256
+Get-FileHash .\usnpw-windows-cli.exe -Algorithm SHA256
+Get-Content .\usnpw-windows-cli.exe.sha256
 ```
 
 5. Install CLI to a user-local bin directory and persist PATH:
 
 ```powershell
-py .\tools\release.py install-cli --artifact .\usnpw-cli.exe
+py .\tools\release.py install-cli --artifact .\usnpw-windows-cli.exe
 ```
 
 6. Restart PowerShell, then run:
@@ -156,18 +156,18 @@ usnpw username -n 20 --profile reddit --safe-mode
 7. For GUI usage, run the labeled GUI artifact (for example `usnpw-windows-gui.exe`).
 
 ## Binary Setup: Linux
-1. Download Linux release artifacts.
-2. Keep each binary and checksum sidecar together (for example `usnpw-cli` + `usnpw-cli.sha256`).
+1. Download Linux release artifacts (raw files; no extraction step required).
+2. Keep each binary and checksum sidecar together (for example `usnpw-linux-cli` + `usnpw-linux-cli.sha256`).
 3. Verify checksum:
 
 ```bash
-sha256sum -c usnpw-cli.sha256
+sha256sum -c usnpw-linux-cli.sha256
 ```
 
 4. Install CLI and persist PATH:
 
 ```bash
-python3 ./tools/release.py install-cli --artifact ./usnpw-cli
+python3 ./tools/release.py install-cli --artifact ./usnpw-linux-cli
 ```
 
 5. Restart shell, then run:
@@ -179,18 +179,18 @@ usnpw username -n 20 --profile reddit --safe-mode
 
 ## Binary Setup: macOS
 
-1. Download macOS release artifacts and checksum sidecars (for example `usnpw-cli`, `usnpw-macos-gui`).
+1. Download macOS release artifacts and checksum sidecars (for example `usnpw-macos-cli`, `usnpw-macos-gui`).
 2. Verify checksum:
 
 ```bash
-shasum -a 256 ./usnpw-cli
-cat ./usnpw-cli.sha256
+shasum -a 256 ./usnpw-macos-cli
+cat ./usnpw-macos-cli.sha256
 ```
 
 3. Install CLI and persist PATH:
 
 ```bash
-python3 ./tools/release.py install-cli --artifact ./usnpw-cli
+python3 ./tools/release.py install-cli --artifact ./usnpw-macos-cli
 ```
 
 4. Restart shell, then run:
@@ -218,7 +218,7 @@ python3 ./tools/release.py install-cli
 
 Expected output names:
 - GUI: `usnpw-<platform>-gui(.exe)`
-- Unified CLI artifact: `usnpw-cli(.exe)` (install step places command as `usnpw(.exe)`)
+- Unified CLI artifact: `usnpw-<platform>-cli(.exe)` (install step places command as `usnpw(.exe)`)
 - Extra CLIs: `usnpw-pwgen(.exe)`, `usnpw-username(.exe)`
 
 `tools/release.py binaries` now builds GUI + CLI by default.

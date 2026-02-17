@@ -271,3 +271,5 @@ python3 ./tools/release.py all --with-binaries
 ```
 
 Phase 4 CI builds native artifacts for Windows, Linux, and macOS with pinned PyInstaller (`6.16.0`), and local `tools/release.py` enforces the same version for binary commands.
+
+`tools/security_audit.py` is intentionally local-only and refuses to run in CI unless explicitly overridden with `--allow-ci`.

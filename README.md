@@ -7,9 +7,9 @@ Local-first, stdlib-only tooling for secure password generation and OPSEC-focuse
 Do not use this project for illegal activity. You are responsible for your own use.
 
 ## Platform Support
-- Windows (source mode + labeled binary artifacts such as `usnpw-cli.exe`, `usnpw-windows-gui.exe`)
-- Linux (source mode + labeled binary artifacts such as `usnpw-cli`, `usnpw-linux-gui`)
-- macOS (source mode + labeled binary artifacts such as `usnpw-cli`, `usnpw-macos-gui`)
+- Windows (source mode + labeled binary artifacts such as `usnpw-windows-cli.exe`, `usnpw-windows-gui.exe`)
+- Linux (source mode + labeled binary artifacts such as `usnpw-linux-cli`, `usnpw-linux-gui`)
+- macOS (source mode + labeled binary artifacts such as `usnpw-macos-cli`, `usnpw-macos-gui`)
 
 ## Install and Setup
 Use `docs/SETUP.md` for complete platform-specific setup, binary install, checksum verification, and troubleshooting.

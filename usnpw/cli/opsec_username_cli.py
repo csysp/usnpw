@@ -23,7 +23,7 @@ from usnpw.core.username_service import generate_usernames
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="OPSEC-ish random username generator (v4).")
+    parser = argparse.ArgumentParser(description="OPSEC-focused random username generator.")
 
     parser.add_argument("-n", "--count", type=int, default=10, help="How many usernames to generate.")
     parser.add_argument("--min-len", type=int, default=8, help="Minimum username length (re-roll if shorter).")
