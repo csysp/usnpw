@@ -4,12 +4,12 @@ This guide covers install and setup for Windows, Linux, and macOS in both source
 
 ## Install Modes
 1. Source mode: run the Python entrypoints directly.
-2. Binary mode: run release artifacts (`UsnPw.exe` on Windows, `UsnPw` on Linux/macOS).
+2. Binary mode: run labeled release artifacts (for example `usnpw-cli(.exe)`, `usnpw-<platform>-gui(.exe)`).
 
 ## Prerequisites
 - Python `3.9+` for source mode.
 - No external Python dependencies for runtime (stdlib-only project).
-- Optional for local binary builds: PyInstaller `6.16.0`.
+- Optional for local binary builds: PyInstaller `6.16.0` (required by `tools/release.py` for binary commands).
 - Optional for BIP39 mode: local 2048-word BIP39 wordlist file.
 - Optional for container mode: Docker Engine with BuildKit enabled.
 
@@ -69,6 +69,8 @@ py .\tools\release.py preflight
 Run tools:
 
 ```powershell
+py .\scripts\usnpw_cli.py -n 5 -l 24
+py .\scripts\usnpw_cli.py username -n 20 --profile reddit --safe-mode
 py .\scripts\pwgen.py -n 5 -l 24
 py .\scripts\opsec_username_gen.py -n 20 --profile reddit
 py .\scripts\usnpw_gui.py
@@ -92,6 +94,8 @@ python3 ./tools/release.py preflight
 Run tools:
 
 ```bash
+python3 ./scripts/usnpw_cli.py -n 5 -l 24
+python3 ./scripts/usnpw_cli.py username -n 20 --profile reddit --safe-mode
 python3 ./scripts/pwgen.py -n 5 -l 24
 python3 ./scripts/opsec_username_gen.py -n 20 --profile reddit
 python3 ./scripts/usnpw_gui.py
@@ -109,6 +113,8 @@ python3 ./tools/release.py preflight
 Run tools:
 
 ```bash
+python3 ./scripts/usnpw_cli.py -n 5 -l 24
+python3 ./scripts/usnpw_cli.py username -n 20 --profile reddit --safe-mode
 python3 ./scripts/pwgen.py -n 5 -l 24
 python3 ./scripts/opsec_username_gen.py -n 20 --profile reddit
 python3 ./scripts/usnpw_gui.py
@@ -125,58 +131,73 @@ If that command fails, use a Python build with Tk support before running `script
 ## Binary Setup: Windows
 
 1. Download release artifacts for Windows.
-2. Keep `UsnPw.exe` and its sidecar checksum file `UsnPw.exe.sha256` together.
-3. Verify checksum:
+2. Keep each binary with its checksum sidecar.
+3. For CLI installs, use `usnpw-cli.exe` and `usnpw-cli.exe.sha256`.
+4. Verify checksum:
 
 ```powershell
-Get-FileHash .\UsnPw.exe -Algorithm SHA256
-Get-Content .\UsnPw.exe.sha256
+Get-FileHash .\usnpw-cli.exe -Algorithm SHA256
+Get-Content .\usnpw-cli.exe.sha256
 ```
 
-4. Run:
+5. Install CLI to a user-local bin directory and persist PATH:
 
 ```powershell
-.\UsnPw.exe
+py .\tools\release.py install-cli --artifact .\usnpw-cli.exe
 ```
+
+6. Restart PowerShell, then run:
+
+```powershell
+usnpw -n 5 -l 24
+usnpw username -n 20 --profile reddit --safe-mode
+```
+
+7. For GUI usage, run the labeled GUI artifact (for example `usnpw-windows-gui.exe`).
 
 ## Binary Setup: Linux
-
 1. Download Linux release artifacts.
-2. Keep `UsnPw` and `UsnPw.sha256` together.
+2. Keep each binary and checksum sidecar together (for example `usnpw-cli` + `usnpw-cli.sha256`).
 3. Verify checksum:
 
 ```bash
-sha256sum -c UsnPw.sha256
+sha256sum -c usnpw-cli.sha256
 ```
 
-4. Make executable and run:
+4. Install CLI and persist PATH:
 
 ```bash
-chmod +x ./UsnPw
-./UsnPw
+python3 ./tools/release.py install-cli --artifact ./usnpw-cli
+```
+
+5. Restart shell, then run:
+
+```bash
+usnpw -n 5 -l 24
+usnpw username -n 20 --profile reddit --safe-mode
 ```
 
 ## Binary Setup: macOS
 
-1. Download macOS release artifacts (`UsnPw` or `UsnPw.app`) and checksum sidecar.
+1. Download macOS release artifacts and checksum sidecars (for example `usnpw-cli`, `usnpw-macos-gui`).
 2. Verify checksum:
 
 ```bash
-shasum -a 256 ./UsnPw
-cat ./UsnPw.sha256
+shasum -a 256 ./usnpw-cli
+cat ./usnpw-cli.sha256
 ```
 
-3. Run:
+3. Install CLI and persist PATH:
 
 ```bash
-chmod +x ./UsnPw
-./UsnPw
+python3 ./tools/release.py install-cli --artifact ./usnpw-cli
 ```
 
-If using `UsnPw.app`, launch it from Finder or:
+4. Restart shell, then run:
 
 ```bash
-open ./UsnPw.app
+usnpw -n 5 -l 24
+usnpw username -n 20 --profile reddit --safe-mode
 ```
 
 ## Build Binaries Locally
@@ -186,26 +207,34 @@ Run on each target OS natively:
 ```powershell
 py .\tools\release.py preflight
 py .\tools\release.py binaries
+py .\tools\release.py install-cli
 ```
 
 ```bash
 python3 ./tools/release.py preflight
 python3 ./tools/release.py binaries
+python3 ./tools/release.py install-cli
 ```
 
 Expected output names:
-- Windows: `UsnPw.exe`
-- Linux: `UsnPw`
-- macOS: `UsnPw` or `UsnPw.app` (host behavior)
+- GUI: `usnpw-<platform>-gui(.exe)`
+- Unified CLI artifact: `usnpw-cli(.exe)` (install step places command as `usnpw(.exe)`)
+- Extra CLIs: `usnpw-pwgen(.exe)`, `usnpw-username(.exe)`
+
+`tools/release.py binaries` now builds GUI + CLI by default.
 
 ## First-Run Validation
 
 ```powershell
+usnpw -n 2 -l 24
+usnpw username -n 5 --profile reddit
 py .\scripts\pwgen.py -n 2 -l 24
 py .\scripts\opsec_username_gen.py -n 5 --profile reddit
 ```
 
 ```bash
+usnpw -n 2 -l 24
+usnpw username -n 5 --profile reddit
 python3 ./scripts/pwgen.py -n 2 -l 24
 python3 ./scripts/opsec_username_gen.py -n 5 --profile reddit
 ```
@@ -229,3 +258,34 @@ python3 -m tkinter
 
 ### `No wordlist path set`
 For BIP39 mode, pass `--bip39-wordlist <path-to-2048-word-file>`.
+
+### `PyInstaller version mismatch` during binary build
+`tools/release.py` enforces a pinned local build version: `pyinstaller==6.16.0`.
+
+Fix:
+
+```powershell
+py -m pip install pyinstaller==6.16.0
+```
+
+```bash
+python3 -m pip install pyinstaller==6.16.0
+```
+
+### `ModuleNotFoundError: No module named 'usnpw'` when running `usnpw`
+This usually means your shell is still resolving an older CLI binary from another directory.
+
+On Windows, check which binary is active:
+
+```powershell
+Get-Command usnpw | Select-Object -ExpandProperty Source
+```
+
+Then reinstall from the current build and restart the shell:
+
+```powershell
+py .\tools\release.py binaries --target cli
+py .\tools\release.py install-cli
+```
+
+If `Get-Command usnpw` still points somewhere else, remove older `usnpw(.exe)` locations from earlier `PATH` entries.

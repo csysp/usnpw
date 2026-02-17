@@ -8,7 +8,7 @@ from _bootstrap import bootstrap_repo_path
 
 bootstrap_repo_path()
 
-from usnpw.cli.opsec_username_cli import main
+from usnpw.cli.usnpw_cli import main
 
 
 if __name__ == "__main__":

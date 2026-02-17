@@ -10,7 +10,7 @@ CI signs every `*.sha256` file produced by `tools/release.py` and uploads:
 - `usnpw-release-publickey.asc` (public key used for verification)
 
 Artifact name:
-- `UsnPw-signatures`
+- `usnpw-signatures`
 
 Workflow:
 - `.github/workflows/release-artifacts.yml`

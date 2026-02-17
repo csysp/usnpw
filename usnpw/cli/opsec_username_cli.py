@@ -152,35 +152,74 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def validate_safe_mode_args(args: argparse.Namespace) -> None:
+    if not args.safe_mode:
+        return
+
+    conflicts: list[str] = []
+    if args.uniqueness_mode != USERNAME_DEFAULT_UNIQUENESS_MODE:
+        conflicts.append(f"--uniqueness-mode {args.uniqueness_mode}")
+    if not args.no_save:
+        conflicts.append("--save")
+    if not args.no_token_save:
+        conflicts.append("--token-save")
+    if args.no_token_block:
+        conflicts.append("--no-token-block")
+    if args.stream_save_tokens:
+        conflicts.append("--stream-save-tokens")
+    if args.allow_plaintext_stream_state:
+        conflicts.append("--allow-plaintext-stream-state")
+    if not args.no_leading_digit:
+        conflicts.append("--allow-leading-digit")
+    if args.max_scheme_pct != USERNAME_DEFAULT_MAX_SCHEME_PCT:
+        conflicts.append(f"--max-scheme-pct {args.max_scheme_pct}")
+    if args.history != USERNAME_DEFAULT_HISTORY:
+        conflicts.append(f"--history {args.history}")
+    if args.pool_scale != USERNAME_DEFAULT_POOL_SCALE:
+        conflicts.append(f"--pool-scale {args.pool_scale}")
+    if args.initials_weight != USERNAME_DEFAULT_INITIALS_WEIGHT:
+        conflicts.append(f"--initials-weight {args.initials_weight}")
+    if args.show_meta:
+        conflicts.append("--show-meta")
+
+    if conflicts:
+        joined = ", ".join(conflicts)
+        raise ValueError(
+            "safe-mode cannot be combined with conflicting options: "
+            f"{joined}. Remove conflicting options or disable --safe-mode."
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    request = UsernameRequest(
-        count=args.count,
-        min_len=args.min_len,
-        max_len=args.max_len,
-        profile=args.profile,
-        safe_mode=args.safe_mode,
-        uniqueness_mode=args.uniqueness_mode,
-        blacklist=args.blacklist,
-        no_save=args.no_save,
-        token_blacklist=args.token_blacklist,
-        no_token_save=args.no_token_save,
-        no_token_block=args.no_token_block,
-        stream_save_tokens=args.stream_save_tokens,
-        stream_state=args.stream_state,
-        stream_state_persist=not args.no_stream_state_persist,
-        allow_plaintext_stream_state=args.allow_plaintext_stream_state,
-        disallow_prefix=tuple(args.disallow_prefix),
-        disallow_substring=tuple(args.disallow_substring),
-        no_leading_digit=args.no_leading_digit,
-        max_scheme_pct=args.max_scheme_pct,
-        history=args.history,
-        pool_scale=args.pool_scale,
-        initials_weight=args.initials_weight,
-        show_meta=args.show_meta,
-    )
 
     try:
+        validate_safe_mode_args(args)
+        request = UsernameRequest(
+            count=args.count,
+            min_len=args.min_len,
+            max_len=args.max_len,
+            profile=args.profile,
+            safe_mode=args.safe_mode,
+            uniqueness_mode=args.uniqueness_mode,
+            blacklist=args.blacklist,
+            no_save=args.no_save,
+            token_blacklist=args.token_blacklist,
+            no_token_save=args.no_token_save,
+            no_token_block=args.no_token_block,
+            stream_save_tokens=args.stream_save_tokens,
+            stream_state=args.stream_state,
+            stream_state_persist=not args.no_stream_state_persist,
+            allow_plaintext_stream_state=args.allow_plaintext_stream_state,
+            disallow_prefix=tuple(args.disallow_prefix),
+            disallow_substring=tuple(args.disallow_substring),
+            no_leading_digit=args.no_leading_digit,
+            max_scheme_pct=args.max_scheme_pct,
+            history=args.history,
+            pool_scale=args.pool_scale,
+            initials_weight=args.initials_weight,
+            show_meta=args.show_meta,
+        )
         result = generate_usernames(request)
     except ValueError as exc:
         print(format_error_text(exc), file=sys.stderr)

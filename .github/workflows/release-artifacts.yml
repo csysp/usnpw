@@ -28,11 +28,11 @@ jobs:
       - name: Upload source artifact
         uses: actions/upload-artifact@v4
         with:
-          name: UsnPw-source
+          name: usnpw-source
           if-no-files-found: error
           path: |
-            dist/UsnPw-source-*.zip
-            dist/UsnPw-source-*.zip.sha256
+            dist/usnpw-source-*.zip
+            dist/usnpw-source-*.zip.sha256
 
   binaries:
     name: Native Binaries (${{ matrix.os }})
@@ -58,16 +58,16 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install pyinstaller==6.16.0
 
-      - name: Build default app binary
+      - name: Build default binaries
         run: python tools/release.py binaries
 
       - name: Upload binaries
         uses: actions/upload-artifact@v4
         with:
-          name: UsnPw-${{ matrix.os }}
+          name: usnpw-${{ matrix.os }}
           if-no-files-found: error
           path: |
-            dist/bin/UsnPw*
+            dist/bin/usnpw*
             dist/bin/*.sha256
 
   sign:
@@ -141,7 +141,7 @@ jobs:
       - name: Upload signatures
         uses: actions/upload-artifact@v4
         with:
-          name: UsnPw-signatures
+          name: usnpw-signatures
           if-no-files-found: error
           path: |
             artifacts/**/*.sha256.asc

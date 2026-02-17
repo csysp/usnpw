@@ -1,6 +1,7 @@
 # USnPw Advanced Usage
 
 This guide focuses on advanced operational use of:
+- `scripts/usnpw_cli.py`
 - `scripts/pwgen.py`
 - `scripts/opsec_username_gen.py`
 - `scripts/usnpw_gui.py`
@@ -10,6 +11,9 @@ For install/setup, use `docs/SETUP.md`.
 ## Command Conventions
 - Windows examples use `py .\scripts\...`
 - Linux/macOS equivalents use `python3 ./scripts/...`
+- Unified wrapper:
+1. password mode is default (`usnpw -n 5 -l 24`)
+2. username mode uses `username` subcommand (`usnpw username -n 20 --profile reddit`)
 
 ## Username Generation: Operating Strategy
 
@@ -133,6 +137,17 @@ py .\scripts\opsec_username_gen.py -n 25 --profile vk
 `--show-meta` emits scheme/separator/case diagnostics.
 Treat this as sensitive output.
 
+### 11. Safe Mode Conflict Behavior
+When `--safe-mode` is enabled, conflicting options now fail closed with an explicit CLI error.
+
+Examples of conflicting options:
+1. `--save`
+2. `--token-save`
+3. `--no-token-block`
+4. `--stream-save-tokens`
+5. `--allow-leading-digit`
+6. non-default anti-fingerprint knobs such as `--max-scheme-pct`, `--history`, `--pool-scale`, `--initials-weight`
+
 ## Password Generator: Advanced Use
 
 ### 1. Select Output Type by Use Case
@@ -255,4 +270,4 @@ python3 ./tools/release.py all
 python3 ./tools/release.py all --with-binaries
 ```
 
-Phase 4 CI builds native artifacts for Windows, Linux, and macOS with pinned PyInstaller (`6.16.0`).
+Phase 4 CI builds native artifacts for Windows, Linux, and macOS with pinned PyInstaller (`6.16.0`), and local `tools/release.py` enforces the same version for binary commands.

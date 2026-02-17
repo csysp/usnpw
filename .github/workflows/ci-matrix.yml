@@ -59,14 +59,14 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install pyinstaller==6.16.0
 
-      - name: Build default app binary
+      - name: Build default binaries
         run: python tools/release.py binaries
 
       - name: Upload binaries
         uses: actions/upload-artifact@v4
         with:
-          name: UsnPw-${{ matrix.os }}
+          name: usnpw-${{ matrix.os }}
           if-no-files-found: error
           path: |
-            dist/bin/UsnPw*
+            dist/bin/usnpw*
             dist/bin/*.sha256

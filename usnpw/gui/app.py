@@ -103,7 +103,13 @@ class USnPwApp(tk.Tk):
         self.u_uniqueness_mode.set(USERNAME_DEFAULT_UNIQUENESS_MODE)
         self.u_no_save.set(USERNAME_DEFAULT_NO_SAVE)
         self.u_no_token_save.set(USERNAME_DEFAULT_NO_TOKEN_SAVE)
+        self.u_no_token_block.set(False)
+        self.u_stream_save_tokens.set(False)
         self.u_no_leading_digit.set(USERNAME_DEFAULT_NO_LEADING_DIGIT)
+        self.u_max_scheme_pct.set(str(USERNAME_DEFAULT_MAX_SCHEME_PCT))
+        self.u_history.set(str(USERNAME_DEFAULT_HISTORY))
+        self.u_pool_scale.set(str(USERNAME_DEFAULT_POOL_SCALE))
+        self.u_initials_weight.set(str(USERNAME_DEFAULT_INITIALS_WEIGHT))
         self.u_show_meta.set(False)
         self.u_allow_plaintext.set(False)
 
@@ -124,10 +130,10 @@ class USnPwApp(tk.Tk):
         self.chk_u_no_leading_digit.configure(state=sensitive_lock_state)
         self.chk_u_show_meta.configure(state=sensitive_lock_state)
 
-        safe_only_state = tk.DISABLED if safe_locked else tk.NORMAL
-        entry_state = tk.DISABLED if safe_locked else tk.NORMAL
-        self.chk_u_no_token_block.configure(state=safe_only_state)
-        self.chk_u_stream_save_tokens.configure(state=safe_only_state)
+        hardened_lock_state = tk.DISABLED if (safe_locked or strict_locked) else tk.NORMAL
+        entry_state = tk.DISABLED if (safe_locked or strict_locked) else tk.NORMAL
+        self.chk_u_no_token_block.configure(state=hardened_lock_state)
+        self.chk_u_stream_save_tokens.configure(state=hardened_lock_state)
         self.u_max_scheme_pct_entry.configure(state=entry_state)
         self.u_history_entry.configure(state=entry_state)
         self.u_pool_scale_entry.configure(state=entry_state)
@@ -209,11 +215,18 @@ class USnPwApp(tk.Tk):
             raise ValueError(f"unsafe path blocked for {label}: {path}")
 
     def _apply_runtime_username_safety_fields(self, fields: dict[str, object]) -> dict[str, object]:
-        if self.strict_opsec_lock.get():
+        strict_locked = self.strict_opsec_lock.get()
+        if strict_locked:
             fields["uniqueness_mode"] = "stream"
             fields["no_save"] = True
             fields["no_token_save"] = True
+            fields["no_token_block"] = False
+            fields["stream_save_tokens"] = False
             fields["no_leading_digit"] = True
+            fields["max_scheme_pct"] = USERNAME_DEFAULT_MAX_SCHEME_PCT
+            fields["history"] = USERNAME_DEFAULT_HISTORY
+            fields["pool_scale"] = USERNAME_DEFAULT_POOL_SCALE
+            fields["initials_weight"] = USERNAME_DEFAULT_INITIALS_WEIGHT
             fields["show_meta"] = False
             fields["allow_plaintext_stream_state"] = False
 
@@ -221,7 +234,7 @@ class USnPwApp(tk.Tk):
             fields["uniqueness_mode"] = "stream"
             fields["no_save"] = True
             fields["no_token_save"] = True
-            fields["no_token_block"] = True
+            fields["no_token_block"] = False if strict_locked else True
             fields["stream_save_tokens"] = False
             fields["stream_state_persist"] = False
             fields["stream_state"] = ""
@@ -240,10 +253,7 @@ class USnPwApp(tk.Tk):
         return fields
 
     def _copy_guard_required(self) -> bool:
-        if not self.copy_guard.get():
-            return False
-        safe_locked = self.strict_opsec_lock.get() or self.u_safe_mode.get()
-        return not safe_locked
+        return bool(self.copy_guard.get())
 
     def _confirm_sensitive_action(self, action: str) -> bool:
         if not self._copy_guard_required():
@@ -430,14 +440,23 @@ class USnPwApp(tk.Tk):
             row1, text="Session-only mode", variable=self.session_only_mode, command=self._on_session_only_toggled
         ).pack(side=tk.LEFT, padx=(10, 0))
         ttk.Checkbutton(row1, text="Copy guard", variable=self.copy_guard).pack(side=tk.LEFT, padx=(10, 0))
-        ttk.Checkbutton(row1, text="Unsafe path block", variable=self.unsafe_path_block).pack(side=tk.LEFT, padx=(10, 0))
+        ttk.Checkbutton(
+            row1,
+            text="Unsafe path block",
+            variable=self.unsafe_path_block,
+        ).pack(side=tk.LEFT, padx=(10, 0))
         ttk.Checkbutton(row1, text="Dark mode", variable=self.dark_mode, command=self._on_theme_toggled).pack(
             side=tk.LEFT
         )
         ttk.Checkbutton(
             row1, text="Shoulder-surf mask", variable=self.shoulder_surf_mask, command=self._on_shoulder_surf_toggled
         ).pack(side=tk.LEFT, padx=(10, 0))
-        self.btn_reveal_mask = ttk.Button(row1, text="Reveal 5s", command=self._reveal_output_temporarily, state=tk.DISABLED)
+        self.btn_reveal_mask = ttk.Button(
+            row1,
+            text="Reveal 5s",
+            command=self._reveal_output_temporarily,
+            state=tk.DISABLED,
+        )
         self.btn_reveal_mask.pack(side=tk.LEFT, padx=(8, 0))
 
         ttk.Checkbutton(row2, text="Auto-clear clipboard", variable=self.auto_clear_clipboard).pack(side=tk.LEFT)
@@ -518,10 +537,16 @@ class USnPwApp(tk.Tk):
         ttk.Button(actions, text="Copy Output", command=lambda: self._copy_text(self.password_output)).pack(
             side=tk.LEFT, padx=6
         )
-        ttk.Button(actions, text="Export...", command=lambda: self._export_text(self.password_output, "password data")).pack(
-            side=tk.LEFT
-        )
-        ttk.Button(actions, text="Clear", command=lambda: self._clear_text(self.password_output)).pack(side=tk.LEFT, padx=6)
+        ttk.Button(
+            actions,
+            text="Export...",
+            command=lambda: self._export_text(self.password_output, "password data"),
+        ).pack(side=tk.LEFT)
+        ttk.Button(
+            actions,
+            text="Clear",
+            command=lambda: self._clear_text(self.password_output),
+        ).pack(side=tk.LEFT, padx=6)
 
         self.password_output = ScrolledText(parent, height=20, wrap=tk.NONE)
         self.password_output.pack(fill=tk.BOTH, expand=True)
@@ -566,7 +591,14 @@ class USnPwApp(tk.Tk):
         self.u_max_scheme_pct_entry = self._add_entry(form, 1, "Max scheme pct", self.u_max_scheme_pct, width=10, col=4)
         self.u_history_entry = self._add_entry(form, 2, "History", self.u_history, width=10)
         self.u_pool_scale_entry = self._add_entry(form, 2, "Pool scale", self.u_pool_scale, width=10, col=2)
-        self.u_initials_weight_entry = self._add_entry(form, 2, "Initials weight", self.u_initials_weight, width=10, col=4)
+        self.u_initials_weight_entry = self._add_entry(
+            form,
+            2,
+            "Initials weight",
+            self.u_initials_weight,
+            width=10,
+            col=4,
+        )
         self._add_entry(form, 3, "Blacklist file", self.u_blacklist, width=54)
         ttk.Button(form, text="Browse", command=lambda: self._browse_path(self.u_blacklist)).grid(
             row=3, column=3, sticky="w", padx=6, pady=4
@@ -623,10 +655,16 @@ class USnPwApp(tk.Tk):
         ttk.Button(actions, text="Copy Output", command=lambda: self._copy_text(self.username_output)).pack(
             side=tk.LEFT, padx=6
         )
-        ttk.Button(actions, text="Export...", command=lambda: self._export_text(self.username_output, "username data")).pack(
-            side=tk.LEFT
-        )
-        ttk.Button(actions, text="Clear", command=lambda: self._clear_text(self.username_output)).pack(side=tk.LEFT, padx=6)
+        ttk.Button(
+            actions,
+            text="Export...",
+            command=lambda: self._export_text(self.username_output, "username data"),
+        ).pack(side=tk.LEFT)
+        ttk.Button(
+            actions,
+            text="Clear",
+            command=lambda: self._clear_text(self.username_output),
+        ).pack(side=tk.LEFT, padx=6)
 
         self.username_output = ScrolledText(parent, height=20, wrap=tk.NONE)
         self.username_output.pack(fill=tk.BOTH, expand=True)
@@ -665,6 +703,9 @@ class USnPwApp(tk.Tk):
             return False
         if path.is_dir():
             self._status_var.set(format_error_status(f"refusing to delete directory for {label}: {path}"))
+            return False
+        if self.unsafe_path_block.get() and self._is_risky_path(path):
+            self._status_var.set(format_error_status(f"unsafe delete path blocked for {label}: {path}"))
             return False
 
         if is_unusual_delete_target(path, label):
@@ -840,10 +881,10 @@ class USnPwApp(tk.Tk):
             return
 
         lines = self._output_cache.get(widget, ())
-        text = "\n".join(lines).strip()
-        if not text:
+        if not lines:
             self._status_var.set("Nothing to copy.")
             return
+        text = "\n".join(lines)
         self.clipboard_clear()
         self.clipboard_append(text)
         if self.auto_clear_clipboard.get():
@@ -889,10 +930,10 @@ class USnPwApp(tk.Tk):
             return
 
         lines = self._output_cache.get(widget, ())
-        text = "\n".join(lines).strip()
-        if not text:
+        if not lines:
             self._status_var.set("Nothing to export.")
             return
+        text = "\n".join(lines)
 
         encrypted = self.encrypt_exports.get()
         export_payload = text + "\n"

@@ -7,9 +7,9 @@ Local-first, stdlib-only tooling for secure password generation and OPSEC-focuse
 Do not use this project for illegal activity. You are responsible for your own use.
 
 ## Platform Support
-- Windows (source mode + `UsnPw.exe` release artifact)
-- Linux (source mode + `UsnPw` release artifact)
-- macOS (source mode + `UsnPw` or `UsnPw.app` release artifact)
+- Windows (source mode + labeled binary artifacts such as `usnpw-cli.exe`, `usnpw-windows-gui.exe`)
+- Linux (source mode + labeled binary artifacts such as `usnpw-cli`, `usnpw-linux-gui`)
+- macOS (source mode + labeled binary artifacts such as `usnpw-cli`, `usnpw-macos-gui`)
 
 ## Install and Setup
 Use `docs/SETUP.md` for complete platform-specific setup, binary install, checksum verification, and troubleshooting.
@@ -33,6 +33,7 @@ python3 ./scripts/usnpw_gui.py
 ## What You Get
 - `scripts/pwgen.py`: password/token generator
 - `scripts/opsec_username_gen.py`: anti-fingerprinting username generator
+- `scripts/usnpw_cli.py`: unified CLI wrapper (`password` default, `username` subcommand)
 - `scripts/usnpw_gui.py`: cross-platform GUI using the same service layer as CLI
 - `usnpw/core/*`: reusable API layer
 - No telemetry, no network calls, no external runtime dependencies
@@ -41,6 +42,8 @@ python3 ./scripts/usnpw_gui.py
 
 ```powershell
 # Windows
+py .\scripts\usnpw_cli.py -n 5 -l 24
+py .\scripts\usnpw_cli.py username -n 20 --profile reddit --safe-mode
 py .\scripts\pwgen.py -n 5 -l 24
 py .\scripts\opsec_username_gen.py -n 20 --profile reddit
 py .\scripts\usnpw_gui.py
@@ -48,6 +51,8 @@ py .\scripts\usnpw_gui.py
 
 ```bash
 # Linux/macOS
+python3 ./scripts/usnpw_cli.py -n 5 -l 24
+python3 ./scripts/usnpw_cli.py username -n 20 --profile reddit --safe-mode
 python3 ./scripts/pwgen.py -n 5 -l 24
 python3 ./scripts/opsec_username_gen.py -n 20 --profile reddit
 python3 ./scripts/usnpw_gui.py
@@ -127,6 +132,10 @@ Private-network runtime summary:
 # compile + tests
 py .\tools\release.py preflight
 
+# build default binaries (gui + cli), then install CLI globally for current user
+py .\tools\release.py binaries
+py .\tools\release.py install-cli
+
 # source artifact + checksums
 py .\tools\release.py all
 
@@ -137,16 +146,18 @@ py .\tools\release.py all --with-binaries
 ```bash
 # Linux/macOS equivalents
 python3 ./tools/release.py preflight
+python3 ./tools/release.py binaries
+python3 ./tools/release.py install-cli
 python3 ./tools/release.py all
 python3 ./tools/release.py all --with-binaries
 ```
 
 Notes:
 - Build binaries natively on each target OS (no cross-compilation in this workflow).
-- PyInstaller is pinned to `6.16.0` for release/CI consistency.
+- PyInstaller is pinned to `6.16.0`; `tools/release.py` hard-fails on version mismatch.
 
 ## Repository Layout
-- `scripts/pwgen.py`, `scripts/opsec_username_gen.py`, `scripts/usnpw_gui.py`: entrypoints
+- `scripts/pwgen.py`, `scripts/opsec_username_gen.py`, `scripts/usnpw_cli.py`, `scripts/usnpw_gui.py`: entrypoints
 - `usnpw/core/*`: engines, policies, storage, stream state, service orchestration
 - `usnpw/cli/*`: CLI parsing and command dispatch
 - `usnpw/gui/*`: GUI app and adapter mapping
