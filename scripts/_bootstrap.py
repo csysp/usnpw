@@ -16,6 +16,10 @@ def _resolve_repo_root(script_file: str | Path) -> Path:
 
 
 def bootstrap_repo_path(script_file: str | Path | None = None) -> None:
+    # PyInstaller/cx_Freeze style binaries bundle modules and do not preserve
+    # the source-repo wrapper layout, so repo-root resolution is not applicable.
+    if getattr(sys, "frozen", False):
+        return
     source_file = __file__ if script_file is None else script_file
     root = str(_resolve_repo_root(source_file))
     if root not in sys.path:

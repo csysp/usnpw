@@ -62,6 +62,20 @@ class BootstrapTests(unittest.TestCase):
         finally:
             shutil.rmtree(case_root, ignore_errors=True)
 
+    def test_bootstrap_repo_path_skips_when_frozen(self) -> None:
+        original_sys_path = list(sys.path)
+        had_frozen = hasattr(sys, "frozen")
+        original_frozen = getattr(sys, "frozen", None)
+        try:
+            setattr(sys, "frozen", True)
+            _BOOTSTRAP_MODULE.bootstrap_repo_path(script_file="definitely-not-a-repo-wrapper.py")
+            self.assertEqual(sys.path, original_sys_path)
+        finally:
+            if had_frozen:
+                setattr(sys, "frozen", original_frozen)
+            else:
+                delattr(sys, "frozen")
+
 
 if __name__ == "__main__":
     unittest.main()
