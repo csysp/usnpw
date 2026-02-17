@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Mapping, Tuple
+from typing import Mapping
 
+from usnpw.core.error_dialect import format_error_text, make_error
 from usnpw.core.models import (
     DEFAULT_USERNAME_BLACKLIST,
     DEFAULT_USERNAME_TOKENS,
@@ -35,7 +36,7 @@ SAFE_MODE_LOCKED_VALUES: dict[str, object] = {
 }
 
 
-def split_csv(value: str) -> Tuple[str, ...]:
+def split_csv(value: str) -> tuple[str, ...]:
     return tuple(part.strip() for part in value.split(",") if part.strip())
 
 
@@ -53,8 +54,10 @@ def parse_float(value: str, field: str) -> float:
         raise ValueError(f"Invalid number for {field}: {value!r}") from exc
 
 
-def format_error_status(message: str) -> str:
-    return f"Error: {message}"
+def format_error_status(error: str | BaseException) -> str:
+    if isinstance(error, BaseException):
+        return format_error_text(error)
+    return format_error_text(make_error("invalid_request", error))
 
 
 def build_export_warning(label: str, encrypted: bool) -> str:

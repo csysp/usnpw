@@ -10,9 +10,10 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 from tkinter.scrolledtext import ScrolledText
-from typing import Callable, Iterable, Tuple
+from typing import Callable, Iterable
 
 from usnpw.core.export_crypto import encrypt_text
+from usnpw.core.error_dialect import make_error
 from usnpw.core.models import (
     USERNAME_DEFAULT_HISTORY,
     USERNAME_DEFAULT_INITIALS_WEIGHT,
@@ -775,11 +776,11 @@ class USnPwApp(tk.Tk):
                 result = task()
                 self._events.put(("ok", (on_ok, result)))
             except (ValueError, OSError, UnicodeError, RuntimeError) as exc:
-                self._events.put(("err", (str(exc), "")))
+                self._events.put(("err", (exc, "")))
             except Exception as exc:
-                context = "internal error: unexpected background task failure"
+                context = make_error("internal_error", "unexpected background task failure")
                 self._events.put(("err", (context, traceback.format_exc())))
-                raise RuntimeError(context) from exc
+                raise RuntimeError(str(context)) from exc
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -941,7 +942,7 @@ class USnPwApp(tk.Tk):
             self._status_var.set(f"Exported output to {path}")
 
     def _generate_passwords(self) -> None:
-        def task() -> Tuple[str, ...]:
+        def task() -> tuple[str, ...]:
             request = build_password_request(
                 {
                     "count": self.p_count.get(),
@@ -968,7 +969,7 @@ class USnPwApp(tk.Tk):
         self._start_job(task, lambda lines: self._write_lines(self.password_output, lines))
 
     def _generate_usernames(self) -> None:
-        def task() -> Tuple[str, ...]:
+        def task() -> tuple[str, ...]:
             fields: dict[str, object] = {
                 "count": self.u_count.get(),
                 "min_len": self.u_min_len.get(),
@@ -1009,4 +1010,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

@@ -76,7 +76,7 @@ Prioritize OPSEC and anti-fingerprinting over everything else.
 - `py -m py_compile scripts/opsec_username_gen.py`
 - `py -m py_compile scripts/usnpw_api.py`
 - `py -m py_compile scripts/usnpw_gui.py`
-- `py -m py_compile usnpw/core/password_engine.py usnpw/core/username_engine.py`
+- `py -m py_compile usnpw/core/password_engine.py usnpw/core/username_generation.py usnpw/core/username_lexicon.py usnpw/core/username_schemes.py usnpw/core/username_storage.py usnpw/core/username_stream_state.py usnpw/core/username_uniqueness.py usnpw/core/username_policies.py`
 - `py -m py_compile usnpw/core/models.py usnpw/core/password_service.py usnpw/core/username_service.py usnpw/core/export_crypto.py`
 - `py -m py_compile usnpw/core/services.py`
 - `py -m py_compile usnpw/cli/pwgen_cli.py usnpw/cli/opsec_username_cli.py`

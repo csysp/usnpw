@@ -4,11 +4,12 @@ from __future__ import annotations
 import argparse
 import sys
 
+from usnpw.core.error_dialect import format_error_text
 from usnpw.core.models import PasswordRequest
 from usnpw.core.password_engine import FORMAT_CHOICES, OUT_ENC_CHOICES
 from usnpw.core.password_service import generate_passwords
 
-def parse_args(argv: list[str]) -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Password / token generator using os.urandom")
 
     # Password mode args
@@ -56,7 +57,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def main(argv: list[str]) -> int:
+def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     request = PasswordRequest(
         count=args.count,
@@ -79,7 +80,7 @@ def main(argv: list[str]) -> int:
     try:
         result = generate_passwords(request)
     except ValueError as exc:
-        print(str(exc), file=sys.stderr)
+        print(format_error_text(exc), file=sys.stderr)
         return 2
     for line in result.outputs:
         print(line)

@@ -2,20 +2,11 @@
 from __future__ import annotations
 
 import sys
-from pathlib import Path
+
+from _bootstrap import bootstrap_repo_path
 
 
-def _bootstrap_repo_path() -> None:
-    here = Path(__file__).resolve().parent
-    for candidate in (here, *here.parents):
-        if (candidate / "usnpw").is_dir():
-            s = str(candidate)
-            if s not in sys.path:
-                sys.path.insert(0, s)
-            return
-
-
-_bootstrap_repo_path()
+bootstrap_repo_path()
 
 from usnpw.cli.opsec_username_cli import main
 

@@ -25,7 +25,7 @@ class ServiceLayerTests(unittest.TestCase):
             generate_passwords(PasswordRequest(count=1, format="hex", bits=130))
 
     def test_password_service_bip39_requires_wordlist_path(self) -> None:
-        with self.assertRaisesRegex(ValueError, "no wordlist path set"):
+        with self.assertRaisesRegex(ValueError, "bip39_wordlist is required when format is bip39"):
             generate_passwords(PasswordRequest(count=1, format="bip39", words=24, bip39_wordlist=""))
 
     def test_password_service_max_entropy_preset(self) -> None:
@@ -92,10 +92,10 @@ class ServiceLayerTests(unittest.TestCase):
         )
         with (
             patch("usnpw.core.username_service.os.name", "posix"),
-            patch("usnpw.core.username_service.engine.acquire_stream_state_lock") as lock_state,
-            patch("usnpw.core.username_service.engine.load_or_init_stream_state") as load_state,
-            patch("usnpw.core.username_service.engine.save_stream_state") as save_state,
-            patch("usnpw.core.username_service.engine.release_stream_state_lock") as release_lock,
+            patch("usnpw.core.username_service.username_stream_state.acquire_stream_state_lock") as lock_state,
+            patch("usnpw.core.username_service.username_stream_state.load_or_init_stream_state") as load_state,
+            patch("usnpw.core.username_service.username_stream_state.save_stream_state") as save_state,
+            patch("usnpw.core.username_service.username_stream_state.release_stream_state_lock") as release_lock,
         ):
             result = generate_usernames(request)
 
@@ -121,10 +121,10 @@ class ServiceLayerTests(unittest.TestCase):
         )
         with (
             patch("usnpw.core.username_service.os.name", "nt"),
-            patch("usnpw.core.username_service.engine.acquire_stream_state_lock") as lock_state,
-            patch("usnpw.core.username_service.engine.load_or_init_stream_state") as load_state,
-            patch("usnpw.core.username_service.engine.save_stream_state") as save_state,
-            patch("usnpw.core.username_service.engine.release_stream_state_lock") as release_lock,
+            patch("usnpw.core.username_service.username_stream_state.acquire_stream_state_lock") as lock_state,
+            patch("usnpw.core.username_service.username_stream_state.load_or_init_stream_state") as load_state,
+            patch("usnpw.core.username_service.username_stream_state.save_stream_state") as save_state,
+            patch("usnpw.core.username_service.username_stream_state.release_stream_state_lock") as release_lock,
         ):
             result = generate_usernames(request)
 
@@ -153,8 +153,11 @@ class ServiceLayerTests(unittest.TestCase):
             )
             lock_obj = object()
             with (
-                patch("usnpw.core.username_service.engine.acquire_stream_state_lock", return_value=lock_obj) as acquire_lock,
-                patch("usnpw.core.username_service.engine.release_stream_state_lock") as release_lock,
+                patch(
+                    "usnpw.core.username_service.username_stream_state.acquire_stream_state_lock",
+                    return_value=lock_obj,
+                ) as acquire_lock,
+                patch("usnpw.core.username_service.username_stream_state.release_stream_state_lock") as release_lock,
             ):
                 result = generate_usernames(request)
 
@@ -192,8 +195,8 @@ class ServiceLayerTests(unittest.TestCase):
                 no_token_block=True,
             )
             with (
-                patch("usnpw.core.username_service.engine.acquire_stream_state_lock") as acquire_lock,
-                patch("usnpw.core.username_service.engine.release_stream_state_lock") as release_lock,
+                patch("usnpw.core.username_service.username_stream_state.acquire_stream_state_lock") as acquire_lock,
+                patch("usnpw.core.username_service.username_stream_state.release_stream_state_lock") as release_lock,
             ):
                 result = generate_usernames(request)
 
@@ -231,8 +234,11 @@ class ServiceLayerTests(unittest.TestCase):
             )
             token_lock = object()
             with (
-                patch("usnpw.core.username_service.engine.acquire_stream_state_lock", return_value=token_lock) as acquire_lock,
-                patch("usnpw.core.username_service.engine.release_stream_state_lock") as release_lock,
+                patch(
+                    "usnpw.core.username_service.username_stream_state.acquire_stream_state_lock",
+                    return_value=token_lock,
+                ) as acquire_lock,
+                patch("usnpw.core.username_service.username_stream_state.release_stream_state_lock") as release_lock,
             ):
                 result = generate_usernames(request)
 

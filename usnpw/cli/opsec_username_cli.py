@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import sys
 
+from usnpw.core.error_dialect import format_error_text
 from usnpw.core.models import (
     DEFAULT_USERNAME_BLACKLIST,
     DEFAULT_USERNAME_TOKENS,
@@ -182,7 +183,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         result = generate_usernames(request)
     except ValueError as exc:
-        print(str(exc), file=sys.stderr)
+        print(format_error_text(exc), file=sys.stderr)
         return 2
 
     for line in result.as_lines(show_meta=request.show_meta):

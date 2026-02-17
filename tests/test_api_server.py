@@ -14,6 +14,24 @@ from usnpw.api.server import APIConfig, _build_config, create_server
 
 
 class APIServerTests(unittest.TestCase):
+    @staticmethod
+    def _error_code(payload: dict[str, object]) -> str:
+        error_obj = payload.get("error")
+        if isinstance(error_obj, dict):
+            code = error_obj.get("code")
+            if isinstance(code, str):
+                return code
+        return ""
+
+    @staticmethod
+    def _error_message(payload: dict[str, object]) -> str:
+        error_obj = payload.get("error")
+        if isinstance(error_obj, dict):
+            message = error_obj.get("message")
+            if isinstance(message, str):
+                return message
+        return ""
+
     @classmethod
     def setUpClass(cls) -> None:
         cls._config = APIConfig(
@@ -75,7 +93,7 @@ class APIServerTests(unittest.TestCase):
     def test_passwords_requires_auth(self) -> None:
         status, payload = self._request("POST", "/v1/passwords", payload={"count": 1})
         self.assertEqual(status, 401)
-        self.assertEqual(payload.get("error"), "unauthorized")
+        self.assertEqual(self._error_code(payload), "unauthorized")
 
     def test_password_generation_endpoint(self) -> None:
         status, payload = self._request(
@@ -132,7 +150,8 @@ class APIServerTests(unittest.TestCase):
             content_type="application/jsonx",
         )
         self.assertEqual(status, 400)
-        self.assertEqual(payload.get("error"), "Content-Type must be application/json")
+        self.assertEqual(self._error_code(payload), "invalid_request")
+        self.assertEqual(self._error_message(payload), "Content-Type must be application/json")
 
     def test_auth_throttle_blocks_repeated_failures(self) -> None:
         config = APIConfig(
@@ -174,9 +193,9 @@ class APIServerTests(unittest.TestCase):
             )
             self.assertEqual(status1, 401)
             self.assertEqual(status2, 429)
-            self.assertEqual(payload2.get("error"), "too_many_auth_failures")
+            self.assertEqual(self._error_code(payload2), "too_many_auth_failures")
             self.assertEqual(status3, 429)
-            self.assertEqual(payload3.get("error"), "too_many_auth_failures")
+            self.assertEqual(self._error_code(payload3), "too_many_auth_failures")
         finally:
             server.shutdown()
             server.server_close()
@@ -261,7 +280,7 @@ class APIServerTests(unittest.TestCase):
                 token="test-token",
             )
         self.assertEqual(status, 500)
-        self.assertEqual(payload.get("error"), "internal_error")
+        self.assertEqual(self._error_code(payload), "internal_error")
 
 
 if __name__ == "__main__":

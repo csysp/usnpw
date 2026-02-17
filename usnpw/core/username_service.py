@@ -3,9 +3,9 @@ from __future__ import annotations
 import os
 from dataclasses import replace
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
 
-from usnpw.core import username_engine as engine
+from usnpw.core import username_generation, username_lexicon, username_policies, username_schemes
+from usnpw.core import username_storage, username_stream_state, username_uniqueness
 from usnpw.core.models import (
     USERNAME_DEFAULT_HISTORY,
     USERNAME_DEFAULT_INITIALS_WEIGHT,
@@ -42,27 +42,27 @@ def apply_safe_mode_overrides(request: UsernameRequest) -> UsernameRequest:
     )
 
 
-def _validate_request(request: UsernameRequest) -> Tuple[engine.PlatformPolicy, int, int]:
+def _validate_request(request: UsernameRequest) -> tuple[username_policies.PlatformPolicy, int, int]:
     if request.count <= 0:
         raise ValueError("count must be > 0")
 
     if request.min_len <= 0 or request.max_len <= 0:
-        raise ValueError("--min-len and --max-len must be > 0")
+        raise ValueError("min_len and max_len must be > 0")
     if request.min_len > request.max_len:
-        raise ValueError("--min-len cannot be greater than --max-len")
+        raise ValueError("min_len cannot be greater than max_len")
 
     if not (0.10 <= request.max_scheme_pct <= 0.80):
-        raise ValueError("--max-scheme-pct must be between 0.10 and 0.80")
+        raise ValueError("max_scheme_pct must be between 0.10 and 0.80")
 
     if not (1 <= request.pool_scale <= 6):
-        raise ValueError("--pool-scale must be between 1 and 6")
+        raise ValueError("pool_scale must be between 1 and 6")
 
-    if request.profile not in engine.PLATFORM_POLICIES:
+    if request.profile not in username_policies.PLATFORM_POLICIES:
         raise ValueError(f"Unknown profile: {request.profile}")
     if request.uniqueness_mode not in ("blacklist", "stream"):
         raise ValueError(f"Unknown uniqueness mode: {request.uniqueness_mode}")
 
-    policy = engine.PLATFORM_POLICIES[request.profile]
+    policy = username_policies.PLATFORM_POLICIES[request.profile]
     effective_min_len = max(request.min_len, policy.min_len)
     effective_max_len = min(request.max_len, policy.max_len)
     if effective_min_len > effective_max_len:
@@ -78,41 +78,41 @@ def _load_username_blacklist(
     *,
     enabled: bool,
     case_insensitive: bool,
-) -> Set[str]:
+) -> set[str]:
     if not enabled:
         return set()
 
-    username_blacklist: Set[str] = set()
-    for username in engine.load_lineset(bl_path, "username blacklist"):
-        key = engine.normalize_username_key(username, case_insensitive=case_insensitive)
+    username_blacklist: set[str] = set()
+    for username in username_storage.load_lineset(bl_path, "username blacklist"):
+        key = username_generation.normalize_username_key(username, case_insensitive=case_insensitive)
         if key:
             username_blacklist.add(key)
     return username_blacklist
 
 
-def _load_token_blacklist(token_path: Path, *, enabled: bool) -> Set[str]:
+def _load_token_blacklist(token_path: Path, *, enabled: bool) -> set[str]:
     if not enabled:
         return set()
 
-    token_blacklist: Set[str] = set()
-    for token in engine.load_lineset(token_path, "token blacklist"):
-        normalized = engine.normalize_token(token)
+    token_blacklist: set[str] = set()
+    for token in username_storage.load_lineset(token_path, "token blacklist"):
+        normalized = username_lexicon.normalize_token(token)
         if normalized:
             token_blacklist.add(normalized)
     return token_blacklist
 
 
-def _build_schemes(initials_weight: float) -> List[engine.Scheme]:
-    schemes: List[engine.Scheme] = []
-    for scheme in engine.DEFAULT_SCHEMES:
+def _build_schemes(initials_weight: float) -> list[username_schemes.Scheme]:
+    schemes: list[username_schemes.Scheme] = []
+    for scheme in username_schemes.DEFAULT_SCHEMES:
         if scheme.name != "initials_style":
             schemes.append(scheme)
             continue
         if initials_weight <= 0:
             continue
-        schemes.append(engine.Scheme(scheme.name, float(initials_weight), scheme.builder))
+        schemes.append(username_schemes.Scheme(scheme.name, float(initials_weight), scheme.builder))
     if not schemes:
-        raise ValueError("No schemes enabled. (Did you set --initials-weight 0 and remove everything?)")
+        raise ValueError("no schemes enabled after applying initials_weight")
     return schemes
 
 
@@ -121,12 +121,12 @@ def _generation_error(
     block_tokens: bool,
     requested: int,
     generated: int,
-    token_cap: Optional[int],
+    token_cap: int | None,
     exc: RuntimeError,
 ) -> ValueError:
     if block_tokens:
         return ValueError(
-            engine.token_saturation_message(
+            username_uniqueness.token_saturation_message(
                 requested=requested,
                 generated=generated,
                 token_cap=token_cap,
@@ -141,8 +141,8 @@ def generate_usernames(request: UsernameRequest) -> UsernameResult:
 
     try:
         bl_path = Path(request.blacklist).expanduser()
-        username_blacklist_lock: Optional[engine.StreamStateLock] = None
-        token_blacklist_lock: Optional[engine.StreamStateLock] = None
+        username_blacklist_lock: username_stream_state.StreamStateLock | None = None
+        token_blacklist_lock: username_stream_state.StreamStateLock | None = None
         token_persist_enabled = (
             not request.no_token_block
             and not request.no_token_save
@@ -152,7 +152,7 @@ def generate_usernames(request: UsernameRequest) -> UsernameResult:
             # Threat model: in blacklist mode with persistence enabled, load+append must be
             # serialized across processes to avoid duplicate admissions from stale in-memory sets.
             try:
-                username_blacklist_lock = engine.acquire_stream_state_lock(bl_path)
+                username_blacklist_lock = username_stream_state.acquire_stream_state_lock(bl_path)
             except (OSError, ValueError) as exc:
                 raise ValueError(f"Unable to acquire username blacklist lock '{bl_path}': {exc}") from exc
 
@@ -161,7 +161,7 @@ def generate_usernames(request: UsernameRequest) -> UsernameResult:
             # Threat model: token-block uniqueness should remain stable across concurrent
             # writers when persistence is enabled, so load+append is serialized.
             try:
-                token_blacklist_lock = engine.acquire_stream_state_lock(token_path)
+                token_blacklist_lock = username_stream_state.acquire_stream_state_lock(token_path)
             except (OSError, ValueError) as exc:
                 raise ValueError(f"Unable to acquire token blacklist lock '{token_path}': {exc}") from exc
 
@@ -174,7 +174,7 @@ def generate_usernames(request: UsernameRequest) -> UsernameResult:
         schemes = _build_schemes(request.initials_weight)
 
         try:
-            pools = engine.build_run_pools(
+            pools = username_lexicon.build_run_pools(
                 count=request.count,
                 pool_scale=request.pool_scale,
                 token_blacklist=token_blacklist if not request.no_token_block else set(),
@@ -182,7 +182,7 @@ def generate_usernames(request: UsernameRequest) -> UsernameResult:
         except RuntimeError as exc:
             raise ValueError(str(exc)) from exc
 
-        state = engine.GenState(
+        state = username_schemes.GenState(
             recent_schemes=[],
             recent_seps=[],
             recent_case_styles=[],
@@ -199,9 +199,9 @@ def generate_usernames(request: UsernameRequest) -> UsernameResult:
         effective_disallow_prefixes = tuple(disallow_prefixes)
         effective_disallow_substrings = tuple(request.disallow_substring)
 
-        token_cap: Optional[int] = None
+        token_cap: int | None = None
         if block_tokens:
-            token_cap = engine.max_token_block_count(
+            token_cap = username_schemes.max_token_block_count(
                 pools=pools,
                 schemes=schemes,
                 max_scheme_pct=request.max_scheme_pct,
@@ -209,27 +209,27 @@ def generate_usernames(request: UsernameRequest) -> UsernameResult:
             if token_cap is not None and request.count > token_cap:
                 suggested = max(1, int(token_cap * 0.82))
                 raise ValueError(
-                    "Requested --count exceeds token-block theoretical capacity for this run: "
+                    "count exceeds token-block theoretical capacity for this run: "
                     f"requested={request.count}, theoretical_max={token_cap}. "
                     "Token blocking requires fresh component tokens per username, and the "
                     "current scheme quota + pool sizes cannot satisfy a larger batch. "
                     f"Available pools after token filtering: adj={len(pools.adjectives)}, "
                     f"noun={len(pools.nouns)}, verb={len(pools.verbs)}, pseudo={len(pools.pseudos)}. "
-                    f"Practical stable target is often lower; try --count <= {suggested}. "
-                    "Use a smaller --count, rotate/clear --token-blacklist, increase "
-                    "--max-scheme-pct, or pass --no-token-block."
+                    f"Practical stable target is often lower; try count <= {suggested}. "
+                    "Use a smaller count, rotate or clear token_blacklist, increase "
+                    "max_scheme_pct, or disable token blocking."
                 )
 
-        records: List[UsernameRecord] = []
-        usernames_to_save: List[str] = []
-        tokens_to_save: Set[str] = set()
-        stream_state_path: Optional[Path] = None
+        records: list[UsernameRecord] = []
+        usernames_to_save: list[str] = []
+        tokens_to_save: set[str] = set()
+        stream_state_path: Path | None = None
         stream_state_persistent = False
         stream_root_secret = b""
         stream_key: bytes
-        stream_tag_map: Dict[str, str]
+        stream_tag_map: dict[str, str]
         stream_counter: int
-        stream_lock: Optional[engine.StreamStateLock] = None
+        stream_lock: username_stream_state.StreamStateLock | None = None
 
         try:
             if request.uniqueness_mode == "stream":
@@ -243,11 +243,11 @@ def generate_usernames(request: UsernameRequest) -> UsernameResult:
                         stream_state_path = default_stream_state_path(request.profile)
 
                     try:
-                        stream_lock = engine.acquire_stream_state_lock(stream_state_path)
+                        stream_lock = username_stream_state.acquire_stream_state_lock(stream_state_path)
                     except OSError as exc:
                         raise ValueError(f"Unable to acquire stream state lock '{stream_state_path}': {exc}") from exc
                     try:
-                        stream_root_secret, stream_counter = engine.load_or_init_stream_state(
+                        stream_root_secret, stream_counter = username_stream_state.load_or_init_stream_state(
                             stream_state_path,
                             allow_plaintext=request.allow_plaintext_stream_state,
                         )
@@ -256,11 +256,11 @@ def generate_usernames(request: UsernameRequest) -> UsernameResult:
                 else:
                     stream_root_secret = os.urandom(32)
                     stream_counter = 0
-                stream_key = engine.derive_stream_profile_key(stream_root_secret, request.profile)
-                stream_tag_map = engine.derive_stream_tag_map(stream_key)
+                stream_key = username_stream_state.derive_stream_profile_key(stream_root_secret, request.profile)
+                stream_tag_map = username_stream_state.derive_stream_tag_map(stream_key)
                 for _ in range(request.count):
                     if stream_state_persistent and stream_lock is not None:
-                        engine.touch_stream_state_lock(stream_lock)
+                        username_stream_state.touch_stream_state_lock(stream_lock)
                     try:
                         (
                             username,
@@ -269,7 +269,7 @@ def generate_usernames(request: UsernameRequest) -> UsernameResult:
                             case_style_used,
                             used_tokens,
                             stream_counter,
-                        ) = engine.generate_stream_unique(
+                        ) = username_generation.generate_stream_unique(
                             stream_key=stream_key,
                             stream_tag_map=stream_tag_map,
                             stream_counter=stream_counter,
@@ -296,7 +296,7 @@ def generate_usernames(request: UsernameRequest) -> UsernameResult:
 
                     if stream_state_persistent and stream_state_path is not None:
                         try:
-                            engine.save_stream_state(
+                            username_stream_state.save_stream_state(
                                 stream_state_path,
                                 stream_root_secret,
                                 stream_counter,
@@ -318,7 +318,7 @@ def generate_usernames(request: UsernameRequest) -> UsernameResult:
             else:
                 for _ in range(request.count):
                     try:
-                        username, scheme_name, sep_used, case_style_used, used_tokens = engine.generate_unique(
+                        username, scheme_name, sep_used, case_style_used, used_tokens = username_generation.generate_unique(
                             username_blacklist_keys=username_blacklist,
                             token_blacklist=token_blacklist,
                             max_len=effective_max_len,
@@ -349,7 +349,10 @@ def generate_usernames(request: UsernameRequest) -> UsernameResult:
                             case_style=case_style_used,
                         )
                     )
-                    username_key = engine.normalize_username_key(username, case_insensitive=policy.case_insensitive)
+                    username_key = username_generation.normalize_username_key(
+                        username,
+                        case_insensitive=policy.case_insensitive,
+                    )
                     username_blacklist.add(username_key)
                     if not request.no_save:
                         usernames_to_save.append(username_key)
@@ -359,7 +362,7 @@ def generate_usernames(request: UsernameRequest) -> UsernameResult:
 
             should_persist_usernames = not request.no_save and usernames_to_save
             if should_persist_usernames:
-                engine.append_lines(bl_path, usernames_to_save)
+                username_storage.append_lines(bl_path, usernames_to_save)
 
             should_persist_tokens = (
                 block_tokens
@@ -368,7 +371,7 @@ def generate_usernames(request: UsernameRequest) -> UsernameResult:
                 and (request.uniqueness_mode == "blacklist" or request.stream_save_tokens)
             )
             if should_persist_tokens:
-                engine.append_lines(token_path, sorted(tokens_to_save))
+                username_storage.append_lines(token_path, sorted(tokens_to_save))
 
             return UsernameResult(
                 records=tuple(records),
@@ -378,10 +381,10 @@ def generate_usernames(request: UsernameRequest) -> UsernameResult:
             )
         finally:
             if stream_lock is not None:
-                engine.release_stream_state_lock(stream_lock)
+                username_stream_state.release_stream_state_lock(stream_lock)
             if token_blacklist_lock is not None:
-                engine.release_stream_state_lock(token_blacklist_lock)
+                username_stream_state.release_stream_state_lock(token_blacklist_lock)
             if username_blacklist_lock is not None:
-                engine.release_stream_state_lock(username_blacklist_lock)
+                username_stream_state.release_stream_state_lock(username_blacklist_lock)
     except (OSError, UnicodeError) as exc:
         raise ValueError(f"I/O failure during username generation: {exc}") from exc

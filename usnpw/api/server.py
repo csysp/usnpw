@@ -13,9 +13,10 @@ from collections import deque
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Mapping, Type
+from typing import Any, Mapping
 
 from usnpw.api.adapters import build_password_request, build_username_request
+from usnpw.core.error_dialect import error_payload, error_payload_from_exception, format_error_text
 from usnpw.core.password_service import generate_passwords
 from usnpw.core.username_service import generate_usernames
 
@@ -146,7 +147,7 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
     def __init__(
         self,
         server_address: tuple[str, int],
-        handler_class: Type[BaseHTTPRequestHandler],
+        handler_class: type[BaseHTTPRequestHandler],
         *,
         max_concurrent_requests: int,
         socket_timeout_seconds: float,
@@ -162,7 +163,11 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
 
     @staticmethod
     def _try_send_overloaded_response(request: socket.socket) -> None:
-        body = b"{\"error\":\"server_overloaded\"}"
+        body = json.dumps(
+            error_payload("server_overloaded", "server is overloaded; retry later"),
+            separators=(",", ":"),
+            ensure_ascii=True,
+        ).encode("utf-8")
         try:
             request.sendall(
                 b"HTTP/1.1 503 Service Unavailable\r\n"
@@ -182,9 +187,9 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
             return
         try:
             super().process_request(request, client_address)
-        except Exception:
+        except (OSError, RuntimeError) as exc:
             self._slots.release()
-            raise
+            raise RuntimeError("failed to dispatch request handler thread") from exc
 
     def process_request_thread(self, request: socket.socket, client_address: tuple[str, int]) -> None:
         try:
@@ -273,7 +278,7 @@ def _build_config(args: argparse.Namespace) -> APIConfig:
     )
 
 
-def _handler_factory(config: APIConfig) -> Type[BaseHTTPRequestHandler]:
+def _handler_factory(config: APIConfig) -> type[BaseHTTPRequestHandler]:
     auth_throttle = AuthThrottle(
         fail_limit=config.auth_fail_limit,
         window_seconds=config.auth_fail_window_seconds,
@@ -300,9 +305,18 @@ def _handler_factory(config: APIConfig) -> Type[BaseHTTPRequestHandler]:
             self.end_headers()
             self.wfile.write(body)
 
-        def _write_internal_error(self) -> None:
+        def _write_internal_error(self, exc: BaseException | None = None) -> None:
             try:
-                self._write_json(500, {"error": "internal_error"})
+                if exc is not None:
+                    sys.stderr.write(
+                        format_error_text(
+                            exc,
+                            default_code="internal_error",
+                            default_message="internal server error",
+                        )
+                        + "\n"
+                    )
+                self._write_json(500, error_payload("internal_error", "internal server error"))
             except OSError:
                 # Client may have disconnected before receiving the response.
                 return
@@ -363,26 +377,38 @@ def _handler_factory(config: APIConfig) -> Type[BaseHTTPRequestHandler]:
                 if self.path == "/healthz":
                     self._write_json(200, {"status": "ok"})
                     return
-                self._write_json(404, {"error": "not_found"})
-            except Exception:
-                self._write_internal_error()
+                self._write_json(404, error_payload("not_found", "endpoint not found"))
+            except (OSError, RuntimeError, ValueError, UnicodeError) as exc:
+                self._write_internal_error(exc)
 
         def do_POST(self) -> None:
             try:
                 if self.path not in ("/v1/passwords", "/v1/usernames"):
-                    self._write_json(404, {"error": "not_found"})
+                    self._write_json(404, error_payload("not_found", "endpoint not found"))
                     return
 
                 client_key = self._client_identity()
                 if auth_throttle.is_blocked(client_key):
-                    self._write_json(429, {"error": "too_many_auth_failures"})
+                    self._write_json(
+                        429,
+                        error_payload(
+                            "too_many_auth_failures",
+                            "authentication temporarily blocked after repeated failures",
+                        ),
+                    )
                     return
 
                 if not self._require_auth():
                     if auth_throttle.record_failure(client_key):
-                        self._write_json(429, {"error": "too_many_auth_failures"})
+                        self._write_json(
+                            429,
+                            error_payload(
+                                "too_many_auth_failures",
+                                "authentication temporarily blocked after repeated failures",
+                            ),
+                        )
                     else:
-                        self._write_json(401, {"error": "unauthorized"})
+                        self._write_json(401, error_payload("unauthorized", "missing or invalid bearer token"))
                     return
 
                 auth_throttle.reset(client_key)
@@ -391,11 +417,27 @@ def _handler_factory(config: APIConfig) -> Type[BaseHTTPRequestHandler]:
                     payload = self._read_json_payload()
                 except PayloadTooLargeError as exc:
                     # Do not keep-alive when the request body was not drained.
-                    self._write_json(413, {"error": str(exc)}, close=True)
+                    self._write_json(
+                        413,
+                        error_payload_from_exception(
+                            exc,
+                            default_code="payload_too_large",
+                            default_message="request body too large",
+                        ),
+                        close=True,
+                    )
                     return
                 except ValueError as exc:
                     # Close on parse/validation failures to avoid leaving unread bytes on keep-alive sockets.
-                    self._write_json(400, {"error": str(exc)}, close=True)
+                    self._write_json(
+                        400,
+                        error_payload_from_exception(
+                            exc,
+                            default_code="invalid_request",
+                            default_message="invalid request payload",
+                        ),
+                        close=True,
+                    )
                     return
 
                 if self.path == "/v1/passwords":
@@ -403,7 +445,14 @@ def _handler_factory(config: APIConfig) -> Type[BaseHTTPRequestHandler]:
                         request = build_password_request(payload, max_count=config.max_password_count)
                         result = generate_passwords(request)
                     except ValueError as exc:
-                        self._write_json(400, {"error": str(exc)})
+                        self._write_json(
+                            400,
+                            error_payload_from_exception(
+                                exc,
+                                default_code="invalid_request",
+                                default_message="invalid password request",
+                            ),
+                        )
                         return
                     self._write_json(200, {"outputs": list(result.outputs)})
                     return
@@ -412,7 +461,14 @@ def _handler_factory(config: APIConfig) -> Type[BaseHTTPRequestHandler]:
                     request = build_username_request(payload, max_count=config.max_username_count)
                     result = generate_usernames(request)
                 except ValueError as exc:
-                    self._write_json(400, {"error": str(exc)})
+                    self._write_json(
+                        400,
+                        error_payload_from_exception(
+                            exc,
+                            default_code="invalid_request",
+                            default_message="invalid username request",
+                        ),
+                    )
                     return
 
                 self._write_json(
@@ -425,8 +481,8 @@ def _handler_factory(config: APIConfig) -> Type[BaseHTTPRequestHandler]:
                     },
                 )
                 return
-            except Exception:
-                self._write_internal_error()
+            except (OSError, RuntimeError, ValueError, UnicodeError) as exc:
+                self._write_internal_error(exc)
 
     return Handler
 
@@ -543,7 +599,7 @@ def main(argv: list[str] | None = None) -> int:
         config = _build_config(_parse_args(argv))
         return run_server(config)
     except (OSError, ValueError) as exc:
-        print(f"api server failed: {exc}", file=sys.stderr)
+        print(format_error_text(exc, default_code="startup_error", default_message="api server startup failed"), file=sys.stderr)
         return 2
 
 

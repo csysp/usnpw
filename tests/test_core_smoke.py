@@ -11,15 +11,14 @@ from usnpw.core.password_engine import generate_password
 from pathlib import Path
 
 from usnpw.core import (
-    username_engine,
     username_generation,
     username_lexicon,
     username_schemes,
-    username_storage,
     username_stream_state,
     username_uniqueness,
 )
-from usnpw.core.username_engine import StreamStateLock, normalize_for_platform, release_stream_state_lock
+from usnpw.core.username_generation import normalize_for_platform
+from usnpw.core.username_stream_state import StreamStateLock, release_stream_state_lock
 from usnpw.core.username_policies import PLATFORM_POLICIES, PlatformPolicy
 
 
@@ -120,7 +119,7 @@ class CoreSmokeTests(unittest.TestCase):
     def test_core_package_import_is_lightweight(self) -> None:
         probe = (
             "import sys; import usnpw.core; "
-            "print(int('usnpw.core.username_engine' in sys.modules)); "
+            "print(int('usnpw.core.username_generation' in sys.modules)); "
             "print(int('usnpw.core.username_service' in sys.modules))"
         )
         proc = subprocess.run(
@@ -173,62 +172,26 @@ class CoreSmokeTests(unittest.TestCase):
                 except OSError:
                     pass
 
-    def test_stream_api_reexports_are_stable(self) -> None:
-        self.assertIs(username_engine.StreamStateLock, username_stream_state.StreamStateLock)
-        self.assertIs(username_engine.acquire_stream_state_lock, username_stream_state.acquire_stream_state_lock)
-        self.assertIs(username_engine.release_stream_state_lock, username_stream_state.release_stream_state_lock)
-        self.assertIs(username_engine.touch_stream_state_lock, username_stream_state.touch_stream_state_lock)
-        self.assertIs(username_engine.load_or_init_stream_state, username_stream_state.load_or_init_stream_state)
-        self.assertIs(username_engine.save_stream_state, username_stream_state.save_stream_state)
-        self.assertIs(username_engine.derive_stream_profile_key, username_stream_state.derive_stream_profile_key)
-        self.assertIs(username_engine.derive_stream_tag_map, username_stream_state.derive_stream_tag_map)
-        self.assertIs(username_engine.scramble_stream_counter, username_stream_state.scramble_stream_counter)
-        self.assertIs(username_engine.stream_tag, username_stream_state.stream_tag)
-
-    def test_uniqueness_helpers_match_engine_wrappers(self) -> None:
+    def test_uniqueness_helpers_are_consistent(self) -> None:
         policy = PLATFORM_POLICIES["reddit"]
-        self.assertEqual(
-            username_engine.extract_component_tokens("Alpha_Beta-123"),
-            username_uniqueness.extract_component_tokens("Alpha_Beta-123", normalize_token=username_engine.normalize_token),
-        )
-        self.assertEqual(
-            username_engine.has_repeated_component_pattern("axisaxis"),
-            username_uniqueness.has_repeated_component_pattern("axisaxis", normalize_token=username_engine.normalize_token),
-        )
-        self.assertEqual(
-            username_engine.apply_stream_tag("samplecore", "abc", policy, 16, 3),
-            username_uniqueness.apply_stream_tag("samplecore", "abc", policy, 16, 3),
-        )
-        self.assertEqual(
-            username_engine.token_saturation_message(10, 7, 8),
-            username_uniqueness.token_saturation_message(10, 7, 8),
-        )
+        normalize_token = username_lexicon.normalize_token
+        tokens = username_uniqueness.extract_component_tokens("Alpha_Beta-123", normalize_token=normalize_token)
+        self.assertEqual(tokens, {"alpha", "beta", "123"})
+        self.assertTrue(username_uniqueness.has_repeated_component_pattern("axisaxis", normalize_token=normalize_token))
+        self.assertEqual(username_uniqueness.apply_stream_tag("samplecore", "abc", policy, 16, 3), "asamplbecorec")
+        self.assertIn("Token-block saturation reached", username_uniqueness.token_saturation_message(10, 7, 8))
 
-    def test_lexicon_and_scheme_api_reexports_are_stable(self) -> None:
-        self.assertIs(username_engine.RunPools, username_lexicon.RunPools)
-        self.assertIs(username_engine.build_run_pools, username_lexicon.build_run_pools)
-        self.assertEqual(username_engine.normalize_token("Alpha_Beta-123"), username_lexicon.normalize_token("Alpha_Beta-123"))
+    def test_lexicon_and_scheme_modules_are_consistent(self) -> None:
+        self.assertEqual(username_lexicon.normalize_token("Alpha_Beta-123"), "alphabeta123")
         self.assertEqual(
-            username_engine.normalize_username_key("Alpha_Beta-123"),
             username_generation.normalize_username_key("Alpha_Beta-123"),
+            "alpha_beta-123",
         )
-        policy = PLATFORM_POLICIES["reddit"]
+        policy = PLATFORM_POLICIES["telegram"]
         self.assertEqual(
-            username_engine.normalize_for_platform("A!B.C__D-", policy=policy, max_len=32),
             username_generation.normalize_for_platform("A!B.C__D-", policy=policy, max_len=32),
+            "abc_d",
         )
-
-        self.assertIs(username_engine.GenState, username_schemes.GenState)
-        self.assertIs(username_engine.Scheme, username_schemes.Scheme)
-        self.assertIs(username_engine.DEFAULT_SCHEMES, username_schemes.DEFAULT_SCHEMES)
-        self.assertIs(username_engine.pick_scheme, username_schemes.pick_scheme)
-        self.assertIs(username_engine.max_token_block_count, username_schemes.max_token_block_count)
-
-    def test_storage_api_reexports_are_stable(self) -> None:
-        self.assertIs(username_engine.load_lineset, username_storage.load_lineset)
-        self.assertIs(username_engine.fsync_parent_directory, username_storage.fsync_parent_directory)
-        self.assertIs(username_engine.append_line, username_storage.append_line)
-        self.assertIs(username_engine.append_lines, username_storage.append_lines)
 
 
 if __name__ == "__main__":

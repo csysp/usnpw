@@ -97,7 +97,7 @@ class GuiAdapterTests(unittest.TestCase):
             build_username_request({"max_scheme_pct": "x"})
 
     def test_error_status_format(self) -> None:
-        self.assertEqual(format_error_status("boom"), "Error: boom")
+        self.assertEqual(format_error_status("boom"), "invalid_request: boom")
 
     def test_safe_mode_defaults(self) -> None:
         self.assertEqual(SAFE_MODE_LOCKED_VALUES["uniqueness_mode"], "stream")

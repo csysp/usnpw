@@ -29,7 +29,7 @@ def generate_passwords(request: PasswordRequest) -> PasswordResult:
     if request.count <= 0:
         raise ValueError("count must be > 0")
     if request.format == "bip39" and not request.bip39_wordlist.strip():
-        raise ValueError("no wordlist path set")
+        raise ValueError("bip39_wordlist is required when format is bip39")
 
     outputs = []
     if request.format == "password":
@@ -73,6 +73,6 @@ def generate_passwords(request: PasswordRequest) -> PasswordResult:
                 out = engine.group_string(out, request.group, request.group_sep, request.group_pad)
             outputs.append(out)
         except (OSError, UnicodeError, ValueError) as e:
-            raise ValueError(f"error: {e}") from e
+            raise ValueError(str(e)) from e
 
     return PasswordResult(outputs=tuple(outputs))
