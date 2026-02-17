@@ -395,11 +395,11 @@ class APIServerTests(unittest.TestCase):
                 t1.start()
                 self.assertTrue(entered.wait(1.0), "slow handler not entered")
 
+                # Use a body-less request for the contending call to avoid a Windows-specific
+                # client send-abort race when the server rejects at accept-time.
                 status2, payload2 = self._request(
-                    "POST",
-                    "/v1/passwords",
-                    payload={"count": 1, "length": 12, "format": "password"},
-                    token="concurrency-token",
+                    "GET",
+                    "/healthz",
                     port=port,
                 )
                 self.assertEqual(status2, 429)
