@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   source:
@@ -146,3 +146,42 @@ jobs:
           path: |
             artifacts/**/*.sha256.asc
             artifacts/usnpw-release-publickey.asc
+
+  publish-release:
+    name: Publish Release
+    needs:
+      - source
+      - binaries
+      - sign
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Package artifacts for release
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          shopt -s nullglob
+          for d in artifacts/*; do
+            [[ -d "$d" ]] || continue
+            name="$(basename "$d" | tr '[:upper:]' '[:lower:]')"
+            (
+              cd "$d"
+              zip -r "../../release-assets/${name}.zip" .
+            )
+          done
+
+      - name: Publish release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: release-assets/*.zip
+          fail_on_unmatched_files: true
