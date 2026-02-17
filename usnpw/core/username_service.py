@@ -18,6 +18,7 @@ from usnpw.core.models import (
     UsernameRecord,
     UsernameRequest,
     UsernameResult,
+    default_stream_state_path,
 )
 
 
@@ -41,8 +42,7 @@ def apply_safe_mode_overrides(request: UsernameRequest) -> UsernameRequest:
     )
 
 
-def generate_usernames(request: UsernameRequest) -> UsernameResult:
-    request = apply_safe_mode_overrides(request)
+def _validate_request(request: UsernameRequest) -> Tuple[engine.PlatformPolicy, int, int]:
     if request.count <= 0:
         raise ValueError("count must be > 0")
 
@@ -70,6 +70,74 @@ def generate_usernames(request: UsernameRequest) -> UsernameResult:
             f"Length constraints impossible for profile '{request.profile}': "
             f"effective min {effective_min_len} > effective max {effective_max_len}."
         )
+    return policy, effective_min_len, effective_max_len
+
+
+def _load_username_blacklist(
+    bl_path: Path,
+    *,
+    enabled: bool,
+    case_insensitive: bool,
+) -> Set[str]:
+    if not enabled:
+        return set()
+
+    username_blacklist: Set[str] = set()
+    for username in engine.load_lineset(bl_path, "username blacklist"):
+        key = engine.normalize_username_key(username, case_insensitive=case_insensitive)
+        if key:
+            username_blacklist.add(key)
+    return username_blacklist
+
+
+def _load_token_blacklist(token_path: Path, *, enabled: bool) -> Set[str]:
+    if not enabled:
+        return set()
+
+    token_blacklist: Set[str] = set()
+    for token in engine.load_lineset(token_path, "token blacklist"):
+        normalized = engine.normalize_token(token)
+        if normalized:
+            token_blacklist.add(normalized)
+    return token_blacklist
+
+
+def _build_schemes(initials_weight: float) -> List[engine.Scheme]:
+    schemes: List[engine.Scheme] = []
+    for scheme in engine.DEFAULT_SCHEMES:
+        if scheme.name != "initials_style":
+            schemes.append(scheme)
+            continue
+        if initials_weight <= 0:
+            continue
+        schemes.append(engine.Scheme(scheme.name, float(initials_weight), scheme.builder))
+    if not schemes:
+        raise ValueError("No schemes enabled. (Did you set --initials-weight 0 and remove everything?)")
+    return schemes
+
+
+def _generation_error(
+    *,
+    block_tokens: bool,
+    requested: int,
+    generated: int,
+    token_cap: Optional[int],
+    exc: RuntimeError,
+) -> ValueError:
+    if block_tokens:
+        return ValueError(
+            engine.token_saturation_message(
+                requested=requested,
+                generated=generated,
+                token_cap=token_cap,
+            )
+        )
+    return ValueError(str(exc))
+
+
+def generate_usernames(request: UsernameRequest) -> UsernameResult:
+    request = apply_safe_mode_overrides(request)
+    policy, effective_min_len, effective_max_len = _validate_request(request)
 
     try:
         bl_path = Path(request.blacklist).expanduser()
@@ -97,31 +165,13 @@ def generate_usernames(request: UsernameRequest) -> UsernameResult:
             except (OSError, ValueError) as exc:
                 raise ValueError(f"Unable to acquire token blacklist lock '{token_path}': {exc}") from exc
 
-        username_blacklist: Set[str] = set()
-        if request.uniqueness_mode == "blacklist":
-            username_blacklist = {
-                engine.normalize_username_key(u, case_insensitive=policy.case_insensitive)
-                for u in engine.load_lineset(bl_path, "username blacklist")
-                if engine.normalize_username_key(u, case_insensitive=policy.case_insensitive)
-            }
-
-        token_blacklist: Set[str] = set()
-        if not request.no_token_block:
-            token_blacklist = {
-                engine.normalize_token(t) for t in engine.load_lineset(token_path, "token blacklist") if engine.normalize_token(t)
-            }
-
-        schemes = []
-        for scheme in engine.DEFAULT_SCHEMES:
-            if scheme.name == "initials_style":
-                if request.initials_weight <= 0:
-                    continue
-                schemes.append(engine.Scheme(scheme.name, float(request.initials_weight), scheme.builder))
-            else:
-                schemes.append(scheme)
-
-        if not schemes:
-            raise ValueError("No schemes enabled. (Did you set --initials-weight 0 and remove everything?)")
+        username_blacklist = _load_username_blacklist(
+            bl_path,
+            enabled=request.uniqueness_mode == "blacklist",
+            case_insensitive=policy.case_insensitive,
+        )
+        token_blacklist = _load_token_blacklist(token_path, enabled=not request.no_token_block)
+        schemes = _build_schemes(request.initials_weight)
 
         try:
             pools = engine.build_run_pools(
@@ -171,13 +221,14 @@ def generate_usernames(request: UsernameRequest) -> UsernameResult:
                 )
 
         records: List[UsernameRecord] = []
+        usernames_to_save: List[str] = []
         tokens_to_save: Set[str] = set()
         stream_state_path: Optional[Path] = None
         stream_state_persistent = False
         stream_root_secret = b""
-        stream_key = b""
-        stream_tag_map: Dict[str, str] = {}
-        stream_counter = 0
+        stream_key: bytes
+        stream_tag_map: Dict[str, str]
+        stream_counter: int
         stream_lock: Optional[engine.StreamStateLock] = None
 
         try:
@@ -189,7 +240,7 @@ def generate_usernames(request: UsernameRequest) -> UsernameResult:
                     if request.stream_state:
                         stream_state_path = Path(request.stream_state).expanduser()
                     else:
-                        stream_state_path = Path.home() / f".opsec_username_stream_{request.profile}.json"
+                        stream_state_path = default_stream_state_path(request.profile)
 
                     try:
                         stream_lock = engine.acquire_stream_state_lock(stream_state_path)
@@ -207,9 +258,7 @@ def generate_usernames(request: UsernameRequest) -> UsernameResult:
                     stream_counter = 0
                 stream_key = engine.derive_stream_profile_key(stream_root_secret, request.profile)
                 stream_tag_map = engine.derive_stream_tag_map(stream_key)
-
-            for _ in range(request.count):
-                if request.uniqueness_mode == "stream":
+                for _ in range(request.count):
                     if stream_state_persistent and stream_lock is not None:
                         engine.touch_stream_state_lock(stream_lock)
                     try:
@@ -237,15 +286,13 @@ def generate_usernames(request: UsernameRequest) -> UsernameResult:
                             block_tokens=block_tokens,
                         )
                     except RuntimeError as exc:
-                        if block_tokens:
-                            raise ValueError(
-                                engine.token_saturation_message(
-                                    requested=request.count,
-                                    generated=len(records),
-                                    token_cap=token_cap,
-                                )
-                            ) from exc
-                        raise ValueError(str(exc)) from exc
+                        raise _generation_error(
+                            block_tokens=block_tokens,
+                            requested=request.count,
+                            generated=len(records),
+                            token_cap=token_cap,
+                            exc=exc,
+                        ) from exc
 
                     if stream_state_persistent and stream_state_path is not None:
                         try:
@@ -257,7 +304,19 @@ def generate_usernames(request: UsernameRequest) -> UsernameResult:
                             )
                         except OSError as exc:
                             raise ValueError(f"Unable to save stream state '{stream_state_path}': {exc}") from exc
-                else:
+                    records.append(
+                        UsernameRecord(
+                            username=username,
+                            scheme=scheme_name,
+                            separator=sep_used,
+                            case_style=case_style_used,
+                        )
+                    )
+                    if block_tokens and used_tokens:
+                        tokens_to_save |= used_tokens
+                        token_blacklist |= used_tokens
+            else:
+                for _ in range(request.count):
                     try:
                         username, scheme_name, sep_used, case_style_used, used_tokens = engine.generate_unique(
                             username_blacklist_keys=username_blacklist,
@@ -274,34 +333,33 @@ def generate_usernames(request: UsernameRequest) -> UsernameResult:
                             block_tokens=block_tokens,
                         )
                     except RuntimeError as exc:
-                        if block_tokens:
-                            raise ValueError(
-                                engine.token_saturation_message(
-                                    requested=request.count,
-                                    generated=len(records),
-                                    token_cap=token_cap,
-                                )
-                            ) from exc
-                        raise ValueError(str(exc)) from exc
+                        raise _generation_error(
+                            block_tokens=block_tokens,
+                            requested=request.count,
+                            generated=len(records),
+                            token_cap=token_cap,
+                            exc=exc,
+                        ) from exc
 
-                records.append(
-                    UsernameRecord(
-                        username=username,
-                        scheme=scheme_name,
-                        separator=sep_used,
-                        case_style=case_style_used,
+                    records.append(
+                        UsernameRecord(
+                            username=username,
+                            scheme=scheme_name,
+                            separator=sep_used,
+                            case_style=case_style_used,
+                        )
                     )
-                )
-
-                if request.uniqueness_mode == "blacklist":
                     username_key = engine.normalize_username_key(username, case_insensitive=policy.case_insensitive)
                     username_blacklist.add(username_key)
                     if not request.no_save:
-                        engine.append_line(bl_path, username_key)
+                        usernames_to_save.append(username_key)
+                    if block_tokens and used_tokens:
+                        tokens_to_save |= used_tokens
+                        token_blacklist |= used_tokens
 
-                if block_tokens and used_tokens:
-                    tokens_to_save |= used_tokens
-                    token_blacklist |= used_tokens
+            should_persist_usernames = not request.no_save and usernames_to_save
+            if should_persist_usernames:
+                engine.append_lines(bl_path, usernames_to_save)
 
             should_persist_tokens = (
                 block_tokens
@@ -310,13 +368,7 @@ def generate_usernames(request: UsernameRequest) -> UsernameResult:
                 and (request.uniqueness_mode == "blacklist" or request.stream_save_tokens)
             )
             if should_persist_tokens:
-                token_path.parent.mkdir(parents=True, exist_ok=True)
-                with token_path.open("a", encoding="utf-8", newline="\n") as handle:
-                    for token in sorted(tokens_to_save):
-                        handle.write(token + "\n")
-                    handle.flush()
-                    os.fsync(handle.fileno())
-                engine.fsync_parent_directory(token_path)
+                engine.append_lines(token_path, sorted(tokens_to_save))
 
             return UsernameResult(
                 records=tuple(records),

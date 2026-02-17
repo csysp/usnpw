@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Dict, Optional, Tuple
 
 from usnpw.core.dpapi import dpapi_protect, dpapi_unprotect
+from usnpw.core.username_storage import fsync_parent_directory
 
 _STREAM_STATE_VERSION = 2
 _STREAM_LOCK_TIMEOUT_SEC = 15.0
@@ -62,7 +63,8 @@ def acquire_stream_state_lock(state_path: Path, timeout_sec: float = _STREAM_LOC
 
     while True:
         try:
-            fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_RDWR)
+            # Use restrictive permissions on POSIX to avoid leaking the owner token to other users.
+            fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
             owner_pid = os.getpid()
             owner_token = secrets.token_hex(16)
             try:
@@ -130,22 +132,6 @@ def _encode_base36_uint(n: int) -> str:
         n, rem = divmod(n, 36)
         out.append(_BASE36[rem])
     return "".join(reversed(out))
-
-
-def _fsync_parent_directory(path: Path) -> None:
-    try:
-        dir_fd = os.open(str(path.parent), os.O_RDONLY)
-    except OSError:
-        return
-    try:
-        os.fsync(dir_fd)
-    except OSError:
-        pass
-    finally:
-        try:
-            os.close(dir_fd)
-        except OSError:
-            pass
 
 
 def load_or_init_stream_state(path: Path, allow_plaintext: bool = False) -> Tuple[bytes, int]:
@@ -253,14 +239,15 @@ def save_stream_state(path: Path, secret: bytes, counter: int, allow_plaintext: 
         payload["secret_hex"] = secret.hex()
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.{time.time_ns()}.tmp")
     try:
-        with tmp.open("w", encoding="utf-8", newline="\n") as handle:
+        fd = os.open(str(tmp), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(json.dumps(payload, sort_keys=True))
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(tmp, path)
-        _fsync_parent_directory(path)
+        fsync_parent_directory(path)
     except OSError as e:
         raise ValueError(f"Unable to write stream state file '{path}': {e}") from e
     finally:

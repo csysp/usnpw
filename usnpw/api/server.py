@@ -289,11 +289,14 @@ def _handler_factory(config: APIConfig) -> Type[BaseHTTPRequestHandler]:
             if os.environ.get("USNPW_API_ACCESS_LOG", "").strip().lower() in ("1", "true", "yes", "on"):
                 sys.stderr.write(f"{self.address_string()} - - [{self.log_date_time_string()}] {fmt % args}\n")
 
-        def _write_json(self, code: int, payload: Mapping[str, Any]) -> None:
+        def _write_json(self, code: int, payload: Mapping[str, Any], *, close: bool = False) -> None:
             body = json.dumps(payload, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
             self.send_response(code)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
+            if close:
+                self.send_header("Connection", "close")
+                self.close_connection = True
             self.end_headers()
             self.wfile.write(body)
 
@@ -315,7 +318,7 @@ def _handler_factory(config: APIConfig) -> Type[BaseHTTPRequestHandler]:
         def _client_identity(self) -> str:
             try:
                 return str(self.client_address[0])
-            except Exception:
+            except (IndexError, TypeError):
                 return "unknown"
 
         @staticmethod
@@ -387,10 +390,12 @@ def _handler_factory(config: APIConfig) -> Type[BaseHTTPRequestHandler]:
                 try:
                     payload = self._read_json_payload()
                 except PayloadTooLargeError as exc:
-                    self._write_json(413, {"error": str(exc)})
+                    # Do not keep-alive when the request body was not drained.
+                    self._write_json(413, {"error": str(exc)}, close=True)
                     return
                 except ValueError as exc:
-                    self._write_json(400, {"error": str(exc)})
+                    # Close on parse/validation failures to avoid leaving unread bytes on keep-alive sockets.
+                    self._write_json(400, {"error": str(exc)}, close=True)
                     return
 
                 if self.path == "/v1/passwords":

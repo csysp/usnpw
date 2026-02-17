@@ -16,6 +16,7 @@ from usnpw.core.models import (
     USERNAME_DEFAULT_UNIQUENESS_MODE,
     PasswordRequest,
     UsernameRequest,
+    default_stream_state_path,
 )
 
 SAFE_MODE_LOCKED_VALUES: dict[str, object] = {
@@ -69,7 +70,7 @@ def effective_stream_state_path(profile: str, stream_state: str) -> Path:
     custom = stream_state.strip()
     if custom:
         return Path(custom).expanduser()
-    return Path.home() / f".opsec_username_stream_{profile}.json"
+    return default_stream_state_path(profile)
 
 
 def stream_state_lock_path(state_path: Path) -> Path:

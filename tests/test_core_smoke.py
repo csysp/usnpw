@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 import os
@@ -19,7 +20,7 @@ from usnpw.core import (
     username_uniqueness,
 )
 from usnpw.core.username_engine import StreamStateLock, normalize_for_platform, release_stream_state_lock
-from usnpw.core.username_policies import PLATFORM_POLICIES
+from usnpw.core.username_policies import PLATFORM_POLICIES, PlatformPolicy
 
 
 class CoreSmokeTests(unittest.TestCase):
@@ -29,10 +30,92 @@ class CoreSmokeTests(unittest.TestCase):
         self.assertEqual(len(out), 32)
         self.assertTrue(set(out).issubset(set(alphabet)))
 
+    def test_password_generation_large_charset_does_not_hang(self) -> None:
+        # Regression test: prior _choice_uniform() implementation could hang forever for len(alphabet) > 256.
+        probe = "\n".join(
+            [
+                "from usnpw.core.password_engine import generate_password",
+                "alphabet = ''.join(chr(0x1000 + i) for i in range(257))",
+                "out = generate_password(64, alphabet)",
+                "print(int(len(out) == 64 and set(out).issubset(set(alphabet))))",
+            ]
+        )
+        proc = subprocess.run(
+            [sys.executable, "-c", probe],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=2.0,
+        )
+        self.assertEqual(proc.stdout.strip(), "1")
+
     def test_platform_normalization_telegram(self) -> None:
         policy = PLATFORM_POLICIES["telegram"]
         out = normalize_for_platform("A!B.C__D-", policy=policy, max_len=32)
         self.assertEqual(out, "abc_d")
+
+    def test_stream_generation_state_is_only_updated_for_emitted_usernames(self) -> None:
+        base36 = "0123456789abcdefghijklmnopqrstuvwxyz"
+        stream_key = b"\x01" * 32
+        tag_map = {ch: ch for ch in base36}
+
+        # Force at least one stream-tag re-roll by disallowing the first tag character.
+        tag0 = username_stream_state.stream_tag(tag_map, 0, scramble_key=stream_key)
+        tag1 = username_stream_state.stream_tag(tag_map, 1, scramble_key=stream_key)
+        self.assertNotEqual(tag0, tag1)
+
+        policy = PlatformPolicy(
+            min_len=1,
+            max_len=32,
+            lowercase=True,
+            case_insensitive=True,
+            disallow_re=re.compile(re.escape(tag0)),
+            collapse_re=None,
+            trim_chars="",
+            separators=("", "_", "-", "."),
+        )
+
+        pools = username_lexicon.RunPools(
+            adjectives=["able", "brisk", "clean"],
+            nouns=["node", "token", "buffer"],
+            verbs=["build", "trace", "encode"],
+            pseudos=["keko", "mavu", "nori"],
+            tags=["xx", "yy", "zz"],
+        )
+        schemes = [username_schemes.Scheme("adj_noun", 1.0, username_schemes.scheme_adj_noun)]
+        state = username_schemes.GenState(
+            recent_schemes=[],
+            recent_seps=[],
+            recent_case_styles=[],
+            scheme_counts={},
+            total_target=1,
+            max_scheme_pct=1.0,
+        )
+
+        username, scheme_name, sep_used, case_style_used, used_tokens, stream_counter = username_generation.generate_stream_unique(
+            stream_key=stream_key,
+            stream_tag_map=tag_map,
+            stream_counter=0,
+            token_blacklist=set(),
+            max_len=32,
+            min_len=1,
+            policy=policy,
+            disallow_prefixes=tuple(),
+            disallow_substrings=tuple(),
+            state=state,
+            schemes=schemes,
+            pools=pools,
+            history_n=10,
+            block_tokens=False,
+            attempts=50,
+        )
+        self.assertTrue(username)
+        self.assertGreaterEqual(stream_counter, 2, "expected at least one tag re-roll")
+        self.assertEqual(len(state.recent_schemes), 1)
+        self.assertEqual(state.scheme_counts.get(scheme_name), 1)
+        self.assertEqual(state.recent_schemes[-1], scheme_name)
+        self.assertEqual(state.recent_seps[-1], sep_used)
+        self.assertEqual(state.recent_case_styles[-1], case_style_used)
 
     def test_core_package_import_is_lightweight(self) -> None:
         probe = (
@@ -145,6 +228,7 @@ class CoreSmokeTests(unittest.TestCase):
         self.assertIs(username_engine.load_lineset, username_storage.load_lineset)
         self.assertIs(username_engine.fsync_parent_directory, username_storage.fsync_parent_directory)
         self.assertIs(username_engine.append_line, username_storage.append_line)
+        self.assertIs(username_engine.append_lines, username_storage.append_lines)
 
 
 if __name__ == "__main__":

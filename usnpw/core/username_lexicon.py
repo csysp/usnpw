@@ -3,12 +3,8 @@ from __future__ import annotations
 import re
 import secrets
 from dataclasses import dataclass
-from typing import List, Optional, Set, Tuple
-
-
-def _schoice(seq):
-    return seq[secrets.randbelow(len(seq))]
-
+from functools import lru_cache
+from typing import List, Set, Tuple
 
 def _secure_sample(seq: List[str], k: int) -> List[str]:
     """
@@ -141,7 +137,7 @@ def build_pseudowords_from_syllables(
     while len(out) < target_count and attempts < max_attempts:
         attempts += 1
         k = min_syl + secrets.randbelow(max_syl - min_syl + 1)
-        w = "".join(_schoice(sy) for _ in range(k))
+        w = "".join(secrets.choice(sy) for _ in range(k))
         if len(w) < 5:
             continue
         if re.search(r"(.)\1\1", w):
@@ -166,21 +162,15 @@ def enforce_disjoint_pools(*pools: List[str]) -> Tuple[List[str], ...]:
 
 
 # Build big pools lazily to avoid import-time heavy initialization.
-_GLOBAL_WORD_POOLS: Optional[Tuple[List[str], List[str], List[str], List[str], List[str]]] = None
-
-
+# lru_cache provides a thread-safe (locked) one-time init, which matters for API server concurrency.
+@lru_cache(maxsize=1)
 def _global_word_pools() -> Tuple[List[str], List[str], List[str], List[str], List[str]]:
-    global _GLOBAL_WORD_POOLS
-    if _GLOBAL_WORD_POOLS is None:
-        adjectives_all = dedupe_keep_order(ADJ_CORE)
-        nouns_all = dedupe_keep_order(NOUN_CORE)
-        verbs_all = dedupe_keep_order(VERB_CORE)
-        pseudo_all = build_pseudowords_from_syllables(SYLLABLES_EXT, target_count=4000, min_syl=2, max_syl=4)
-        tags_all = build_pseudowords_from_syllables(SYLLABLES_EXT, target_count=2500, min_syl=2, max_syl=3)
-        _GLOBAL_WORD_POOLS = enforce_disjoint_pools(
-            adjectives_all, nouns_all, verbs_all, pseudo_all, tags_all
-        )
-    return _GLOBAL_WORD_POOLS
+    adjectives_all = dedupe_keep_order(ADJ_CORE)
+    nouns_all = dedupe_keep_order(NOUN_CORE)
+    verbs_all = dedupe_keep_order(VERB_CORE)
+    pseudo_all = build_pseudowords_from_syllables(SYLLABLES_EXT, target_count=4000, min_syl=2, max_syl=4)
+    tags_all = build_pseudowords_from_syllables(SYLLABLES_EXT, target_count=2500, min_syl=2, max_syl=3)
+    return enforce_disjoint_pools(adjectives_all, nouns_all, verbs_all, pseudo_all, tags_all)
 
 
 @dataclass

@@ -90,17 +90,11 @@ def fuzz(iterations: int, seed: int) -> int:
             build_password_request(pw_fields)
         except ValueError:
             pass
-        except Exception as exc:  # pragma: no cover
-            failures += 1
-            print(f"[unexpected] build_password_request i={i} exc={exc!r}", file=sys.stderr)
 
         try:
             build_username_request(u_fields)
         except ValueError:
             pass
-        except Exception as exc:  # pragma: no cover
-            failures += 1
-            print(f"[unexpected] build_username_request i={i} exc={exc!r}", file=sys.stderr)
 
     if failures:
         print(f"[fuzz] failures={failures}", file=sys.stderr)

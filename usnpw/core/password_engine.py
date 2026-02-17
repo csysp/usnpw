@@ -14,25 +14,18 @@ from __future__ import annotations
 import base64
 import hashlib
 import os
+import secrets
 import uuid
 from pathlib import Path
 
 
 # ---------------- Password mode (unbiased selection) ----------------
 
-def _choice_uniform(alphabet: str) -> str:
+def generate_password(length: int, alphabet: str) -> str:
     if not alphabet:
         raise ValueError("alphabet is empty")
-    n = len(alphabet)
-    limit = 256 - (256 % n)  # rejection sampling to avoid modulo bias
-    while True:
-        b = os.urandom(1)[0]
-        if b < limit:
-            return alphabet[b % n]
-
-
-def generate_password(length: int, alphabet: str) -> str:
-    return "".join(_choice_uniform(alphabet) for _ in range(length))
+    # `secrets.choice` is unbiased and supports arbitrary alphabet lengths.
+    return "".join(secrets.choice(alphabet) for _ in range(length))
 
 
 # ---------------- Encodings ----------------
@@ -52,6 +45,7 @@ def encode_base64url(b: bytes) -> str:
 # Crockford Base32 (human-friendly)
 _CROCK32_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 _CROCK32_CHECK_ALPHABET = _CROCK32_ALPHABET + "*~$=U"  # mod 37
+_CROCK32_VALUE = {ch: i for i, ch in enumerate(_CROCK32_ALPHABET)}
 
 
 def encode_crock32(data: bytes) -> str:
@@ -77,7 +71,7 @@ def crock32_checksum(payload_str: str) -> str:
         ch = ch.upper()
         if ch not in _CROCK32_ALPHABET:
             raise ValueError(f"invalid crock32 char for checksum: {ch}")
-        vals.append(_CROCK32_ALPHABET.index(ch))
+        vals.append(_CROCK32_VALUE[ch])
     c = 0
     for v in vals:
         c = (c * 32 + v) % 37
@@ -272,5 +266,3 @@ def token_from_format(
         return encode_bytes_by_name(digest, out_enc)
 
     raise ValueError(f"unsupported format: {fmt}")
-
-

@@ -47,7 +47,16 @@ def generate_unique(
     history_n: int,
     block_tokens: bool,
     attempts: int = 80_000,
+    *,
+    push_state: bool = True,
 ) -> Tuple[str, str, str, str, Set[str]]:
+    if policy.case_insensitive:
+        prefixes = tuple(p.lower() for p in disallow_prefixes if p)
+        subs = tuple(sub.lower() for sub in disallow_substrings if sub)
+    else:
+        prefixes = tuple(p for p in disallow_prefixes if p)
+        subs = tuple(sub for sub in disallow_substrings if sub)
+
     for _ in range(attempts):
         scheme = schemes_mod.pick_scheme(state, schemes)
         raw_u, sep_used, case_style_used, tokens_used = scheme.builder(state, pools, history_n)
@@ -58,14 +67,7 @@ def generate_unique(
         if uniqueness.has_repeated_component_pattern(u, normalize_token=lexicon.normalize_token):
             continue
 
-        if policy.case_insensitive:
-            ul = u.lower()
-            prefixes = tuple(p.lower() for p in disallow_prefixes if p)
-            subs = tuple(sub.lower() for sub in disallow_substrings if sub)
-        else:
-            ul = u
-            prefixes = tuple(p for p in disallow_prefixes if p)
-            subs = tuple(sub for sub in disallow_substrings if sub)
+        ul = u.lower() if policy.case_insensitive else u
 
         if any(ul.startswith(p) for p in prefixes):
             continue
@@ -86,7 +88,8 @@ def generate_unique(
         else:
             all_toks = set()
 
-        state.push(scheme.name, sep_used, case_style_used, history_n)
+        if push_state:
+            state.push(scheme.name, sep_used, case_style_used, history_n)
         return u, scheme.name, sep_used, case_style_used, all_toks
 
     raise RuntimeError(
@@ -112,6 +115,13 @@ def generate_stream_unique(
     block_tokens: bool,
     attempts: int = 2000,
 ) -> Tuple[str, str, str, str, Set[str], int]:
+    if policy.case_insensitive:
+        prefixes = tuple(p.lower() for p in disallow_prefixes if p)
+        subs = tuple(s.lower() for s in disallow_substrings if s)
+    else:
+        prefixes = tuple(p for p in disallow_prefixes if p)
+        subs = tuple(s for s in disallow_substrings if s)
+
     for _ in range(attempts):
         base_u, scheme_name, sep_used, case_style_used, used_tokens = generate_unique(
             username_blacklist_keys=set(),
@@ -127,6 +137,7 @@ def generate_stream_unique(
             history_n=history_n,
             block_tokens=block_tokens,
             attempts=1200,
+            push_state=False,
         )
 
         counter_bytes = stream_counter.to_bytes(8, "big")
@@ -141,20 +152,14 @@ def generate_stream_unique(
         if not uniqueness.contains_subsequence(u, tag):
             continue
 
-        if policy.case_insensitive:
-            cmp_u = u.lower()
-            prefixes = tuple(p.lower() for p in disallow_prefixes if p)
-            subs = tuple(s.lower() for s in disallow_substrings if s)
-        else:
-            cmp_u = u
-            prefixes = tuple(p for p in disallow_prefixes if p)
-            subs = tuple(s for s in disallow_substrings if s)
+        cmp_u = u.lower() if policy.case_insensitive else u
 
         if any(cmp_u.startswith(p) for p in prefixes):
             continue
         if any(s in cmp_u for s in subs):
             continue
 
+        state.push(scheme_name, sep_used, case_style_used, history_n)
         return u, scheme_name, sep_used, case_style_used, used_tokens, stream_counter
 
     raise RuntimeError(

@@ -30,6 +30,7 @@ from usnpw.core.username_policies import PLATFORM_POLICIES, PlatformPolicy
 load_lineset = storage.load_lineset
 fsync_parent_directory = storage.fsync_parent_directory
 append_line = storage.append_line
+append_lines = storage.append_lines
 
 
 def normalize_for_platform(u: str, policy: PlatformPolicy, max_len: int) -> str:
@@ -116,10 +117,6 @@ derive_stream_profile_key = stream_state.derive_stream_profile_key
 derive_stream_tag_map = stream_state.derive_stream_tag_map
 scramble_stream_counter = stream_state.scramble_stream_counter
 stream_tag = stream_state.stream_tag
-
-
-def _contains_subsequence(s: str, subseq: str) -> bool:
-    return uniqueness.contains_subsequence(s, subseq)
 
 
 def apply_stream_tag(core: str, tag: str, policy: PlatformPolicy, max_len: int, selector: int) -> str:

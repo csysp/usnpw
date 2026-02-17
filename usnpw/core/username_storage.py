@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import os
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Set
+from typing import Iterable, Iterator, Set, TextIO
 
 
 def load_lineset(path: Path, label: str) -> Set[str]:
@@ -30,10 +31,43 @@ def fsync_parent_directory(path: Path) -> None:
             pass
 
 
-def append_line(path: Path, line: str) -> None:
+@contextmanager
+def _open_append_private(path: Path) -> Iterator[TextIO]:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8", newline="\n") as handle:
-        handle.write(line + "\n")
+    if os.name == "nt":
+        with path.open("a", encoding="utf-8", newline="\n") as handle:
+            yield handle
+        return
+
+    # Create with restrictive permissions on POSIX; prevents leaking persisted usernames/tokens.
+    fd = os.open(str(path), os.O_APPEND | os.O_CREAT | os.O_WRONLY, 0o600)
+    try:
+        os.fchmod(fd, 0o600)
+    except OSError as exc:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        raise ValueError(f"Unable to enforce private permissions on '{path}': {exc}") from exc
+    with os.fdopen(fd, "a", encoding="utf-8", newline="\n") as handle:
+        yield handle
+
+
+def append_line(path: Path, line: str) -> None:
+    append_lines(path, (line,))
+
+
+def append_lines(path: Path, lines: Iterable[str]) -> None:
+    iterator = iter(lines)
+    try:
+        first = next(iterator)
+    except StopIteration:
+        return
+
+    with _open_append_private(path) as handle:
+        handle.write(first + "\n")
+        for line in iterator:
+            handle.write(line + "\n")
         handle.flush()
         os.fsync(handle.fileno())
     fsync_parent_directory(path)
@@ -43,4 +77,5 @@ __all__ = [
     "load_lineset",
     "fsync_parent_directory",
     "append_line",
+    "append_lines",
 ]

@@ -17,6 +17,10 @@ USERNAME_DEFAULT_POOL_SCALE = 4
 USERNAME_DEFAULT_INITIALS_WEIGHT = 0.0
 
 
+def default_stream_state_path(profile: str) -> Path:
+    return Path.home() / f".opsec_username_stream_{profile}.json"
+
+
 @dataclass(frozen=True)
 class PasswordRequest:
     count: int = 1

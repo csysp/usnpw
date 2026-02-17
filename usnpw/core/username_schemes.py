@@ -10,28 +10,24 @@ from typing import Callable, Dict, List, Optional, Set, Tuple
 from usnpw.core.username_lexicon import RunPools, normalize_token
 
 
-def schoice(seq):
-    return seq[secrets.randbelow(len(seq))]
-
-
 def rand_bool(p_true: float) -> bool:
     return secrets.randbelow(10_000) < int(p_true * 10_000)
 
 
 def rand_digits(n: int) -> str:
-    return "".join(schoice(string.digits) for _ in range(n))
+    return "".join(secrets.choice(string.digits) for _ in range(n))
 
 
 def rand_letters(n: int) -> str:
     alphabet = string.ascii_lowercase
-    return "".join(schoice(alphabet) for _ in range(n))
+    return "".join(secrets.choice(alphabet) for _ in range(n))
 
 
 _BASE36 = "0123456789abcdefghijklmnopqrstuvwxyz"
 
 
 def rand_base36(n: int) -> str:
-    return "".join(schoice(_BASE36) for _ in range(n))
+    return "".join(secrets.choice(_BASE36) for _ in range(n))
 
 
 SAFE_SEPARATORS = ["", "_", "-", "."]
@@ -73,7 +69,7 @@ class GenState:
 
 def choose_nonrecent(seq: List[str], recent: List[str]) -> str:
     candidates = [x for x in seq if x not in recent]
-    return schoice(candidates) if candidates else schoice(seq)
+    return secrets.choice(candidates) if candidates else secrets.choice(seq)
 
 
 def scheme_cap(max_pct: float, total: int) -> int:
@@ -88,22 +84,22 @@ def add_noise(u: str, sep: str) -> str:
     if not rand_bool(0.55):
         return u
 
-    mode = schoice(["suffix_digits", "prefix_letters", "mid_digits", "suffix_base36", "wrap_tag"])
+    mode = secrets.choice(["suffix_digits", "prefix_letters", "mid_digits", "suffix_base36", "wrap_tag"])
     if mode == "suffix_digits":
         # lower probability and variable length
-        return u + rand_digits(schoice([1, 2, 3]))
+        return u + rand_digits(secrets.choice([1, 2, 3]))
     if mode == "prefix_letters":
         # short prefix makes it look more "organic" sometimes
-        pre = rand_letters(schoice([1, 2]))
+        pre = rand_letters(secrets.choice([1, 2]))
         return pre + u
     if mode == "mid_digits":
         if len(u) < 6:
             return u + rand_digits(2)
         pos = 2 + secrets.randbelow(max(1, len(u) - 3))
-        return u[:pos] + rand_digits(schoice([1, 2])) + u[pos:]
+        return u[:pos] + rand_digits(secrets.choice([1, 2])) + u[pos:]
     if mode == "suffix_base36":
         # tiny base36 tag
-        return u + (sep if sep and rand_bool(0.4) else "") + rand_base36(schoice([2, 3]))
+        return u + (sep if sep and rand_bool(0.4) else "") + rand_base36(secrets.choice([2, 3]))
     # wrap_tag
     tag = rand_base36(2) if rand_bool(0.6) else rand_letters(2)
     glue = sep if sep else ""
@@ -141,8 +137,8 @@ def scheme_adj_noun(state: GenState, pools: RunPools, history_n: int) -> Tuple[s
     sep = choose_nonrecent(SAFE_SEPARATORS, state.recent_seps)
     case_style = choose_nonrecent(CASE_STYLES, state.recent_case_styles)
 
-    a = schoice(pools.adjectives)
-    n = schoice(pools.nouns)
+    a = secrets.choice(pools.adjectives)
+    n = secrets.choice(pools.nouns)
     parts = apply_case_style([a, n], case_style)
     u = sep.join(parts)
     u = add_noise(u, sep)
@@ -154,13 +150,13 @@ def scheme_verb_noun_tag(state: GenState, pools: RunPools, history_n: int) -> Tu
     sep = choose_nonrecent(SAFE_SEPARATORS, state.recent_seps)
     case_style = choose_nonrecent(CASE_STYLES, state.recent_case_styles)
 
-    v = schoice(pools.verbs)
-    n = schoice(pools.nouns)
+    v = secrets.choice(pools.verbs)
+    n = secrets.choice(pools.nouns)
     parts = apply_case_style([v, n], case_style)
     core = sep.join(parts)
 
     # tag from dedicated pool or small alpha/base36
-    tag = schoice([schoice(pools.tags), rand_base36(2), rand_letters(2), rand_letters(3)])
+    tag = secrets.choice([secrets.choice(pools.tags), rand_base36(2), rand_letters(2), rand_letters(3)])
     glue = sep if sep else ""
     if rand_bool(0.55):
         u = core + glue + tag
@@ -175,11 +171,11 @@ def scheme_pseudoword_pair(state: GenState, pools: RunPools, history_n: int) -> 
     sep = choose_nonrecent(SAFE_SEPARATORS, state.recent_seps)
     case_style = choose_nonrecent(CASE_STYLES, state.recent_case_styles)
 
-    w1 = schoice(pools.pseudos)
+    w1 = secrets.choice(pools.pseudos)
     tokens = {normalize_token(w1)}
 
     if rand_bool(0.45):
-        w2 = schoice(pools.pseudos)
+        w2 = secrets.choice(pools.pseudos)
         tokens.add(normalize_token(w2))
         parts = apply_case_style([w1, w2], case_style)
         u = sep.join(parts)
@@ -194,9 +190,9 @@ def scheme_compound_3(state: GenState, pools: RunPools, history_n: int) -> Tuple
     sep = choose_nonrecent(SAFE_SEPARATORS, state.recent_seps)
     case_style = choose_nonrecent(CASE_STYLES, state.recent_case_styles)
 
-    a = schoice(pools.adjectives)
-    n1 = schoice(pools.nouns)
-    n2 = schoice(pools.nouns)
+    a = secrets.choice(pools.adjectives)
+    n1 = secrets.choice(pools.nouns)
+    n2 = secrets.choice(pools.nouns)
     parts = apply_case_style([a, n1, n2], case_style)
     u = sep.join(parts)
     u = add_noise(u, sep)
@@ -212,12 +208,12 @@ def scheme_initials_style(state: GenState, pools: RunPools, history_n: int) -> T
     sep = choose_nonrecent(SAFE_SEPARATORS, state.recent_seps)
     case_style = choose_nonrecent(CASE_STYLES, state.recent_case_styles)
 
-    a = schoice(pools.adjectives).lower()
-    n = schoice(pools.nouns).lower()
+    a = secrets.choice(pools.adjectives).lower()
+    n = secrets.choice(pools.nouns).lower()
     initials = (a[0] + n[0]).lower()
 
     # Use a pseudo token sometimes to break the "2 letters + English" silhouette
-    core = schoice([schoice(pools.pseudos), n, a + n, n + a])
+    core = secrets.choice([secrets.choice(pools.pseudos), n, a + n, n + a])
 
     # Add variability in placement and separators
     if rand_bool(0.5):
@@ -230,7 +226,7 @@ def scheme_initials_style(state: GenState, pools: RunPools, history_n: int) -> T
 
     # Avoid year-ish: never add 4 digits; if 2 digits start with 19/20, reroll
     if rand_bool(0.35):
-        num_len = schoice([1, 2, 3])
+        num_len = secrets.choice([1, 2, 3])
         num = rand_digits(num_len)
         if num.startswith(("19", "20")) and len(num) >= 2:
             num = rand_digits(num_len)
@@ -240,15 +236,13 @@ def scheme_initials_style(state: GenState, pools: RunPools, history_n: int) -> T
     return u, sep, case_style, {normalize_token(a), normalize_token(n), normalize_token(core), normalize_token(initials)}
 
 
-_DEFAULT_SCHEMES: List[Scheme] = [
+DEFAULT_SCHEMES: Tuple[Scheme, ...] = (
     Scheme("adj_noun", 1.00, scheme_adj_noun),
     Scheme("verb_noun_tag", 1.00, scheme_verb_noun_tag),
     Scheme("pseudoword_pair", 1.00, scheme_pseudoword_pair),
     Scheme("compound_3", 0.90, scheme_compound_3),
     Scheme("initials_style", 0.12, scheme_initials_style),  # intentionally low
-]
-
-DEFAULT_SCHEMES: List[Scheme] = _DEFAULT_SCHEMES
+)
 
 
 def pick_scheme(state: GenState, schemes: List[Scheme]) -> Scheme:
