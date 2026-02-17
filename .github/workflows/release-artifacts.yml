@@ -131,10 +131,13 @@ jobs:
 
           for f in "${files[@]}"; do
             if [[ -n "${USNPW_GPG_PASSPHRASE:-}" ]]; then
-              printf '%s' "$USNPW_GPG_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 \
-                --local-user "${{ steps.gpg.outputs.key_id }}" --detach-sign --armor -o "${f}.asc" "${f}"
+              printf '%s' "$USNPW_GPG_PASSPHRASE" | \
+                gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 \
+                  --local-user "${{ steps.gpg.outputs.key_id }}" \
+                  --detach-sign --armor -o "${f}.asc" "${f}"
             else
-              gpg --batch --yes --local-user "${{ steps.gpg.outputs.key_id }}" --detach-sign --armor -o "${f}.asc" "${f}"
+              gpg --batch --yes --local-user "${{ steps.gpg.outputs.key_id }}" \
+                --detach-sign --armor -o "${f}.asc" "${f}"
             fi
           done
 
