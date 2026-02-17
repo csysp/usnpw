@@ -50,6 +50,8 @@ curl -X POST http://127.0.0.1:8080/v1/passwords \
 
 Operational guidance: prefer `USNPW_API_TOKEN_FILE` over plaintext environment variables; keep `USNPW_API_TOKEN` disabled unless explicitly required; run with read-only root and minimal capabilities; and keep deployments on private networks unless you add explicit TLS and network controls.
 
+API runtime hardening controls are enabled by default. For load-abuse tuning details, use `docs/ADVANCED_USAGE.md`.
+
 ## Source Setup: Windows
 From repository root:
 

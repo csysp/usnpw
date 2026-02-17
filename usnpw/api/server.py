@@ -28,10 +28,14 @@ DEFAULT_MAX_BODY_BYTES = 16 * 1024
 DEFAULT_MAX_PASSWORD_COUNT = 512
 DEFAULT_MAX_USERNAME_COUNT = 512
 DEFAULT_MAX_CONCURRENT_REQUESTS = 256
+DEFAULT_MAX_CONCURRENT_REQUESTS_PER_CLIENT = 32
 DEFAULT_SOCKET_TIMEOUT_SECONDS = 5.0
 DEFAULT_AUTH_FAIL_LIMIT = 16
 DEFAULT_AUTH_FAIL_WINDOW_SECONDS = 60
 DEFAULT_AUTH_BLOCK_SECONDS = 300
+DEFAULT_REQUEST_RATE_LIMIT = 240
+DEFAULT_REQUEST_RATE_WINDOW_SECONDS = 10
+DEFAULT_REQUEST_RATE_BLOCK_SECONDS = 30
 DEFAULT_REQUEST_QUEUE_SIZE = 256
 DEFAULT_AUTH_TRACKED_KEYS_MAX = 8192
 DEFAULT_AUTH_CLEANUP_INTERVAL_SECONDS = 30.0
@@ -55,10 +59,14 @@ class APIConfig:
     max_password_count: int = DEFAULT_MAX_PASSWORD_COUNT
     max_username_count: int = DEFAULT_MAX_USERNAME_COUNT
     max_concurrent_requests: int = DEFAULT_MAX_CONCURRENT_REQUESTS
+    max_concurrent_requests_per_client: int = DEFAULT_MAX_CONCURRENT_REQUESTS_PER_CLIENT
     socket_timeout_seconds: float = DEFAULT_SOCKET_TIMEOUT_SECONDS
     auth_fail_limit: int = DEFAULT_AUTH_FAIL_LIMIT
     auth_fail_window_seconds: int = DEFAULT_AUTH_FAIL_WINDOW_SECONDS
     auth_block_seconds: int = DEFAULT_AUTH_BLOCK_SECONDS
+    request_rate_limit: int = DEFAULT_REQUEST_RATE_LIMIT
+    request_rate_window_seconds: int = DEFAULT_REQUEST_RATE_WINDOW_SECONDS
+    request_rate_block_seconds: int = DEFAULT_REQUEST_RATE_BLOCK_SECONDS
     tls_cert_file: str = ""
     tls_key_file: str = ""
 
@@ -208,6 +216,109 @@ class AuthThrottle:
             self._last_seen.pop(key, None)
 
 
+class RequestRateThrottle:
+    def __init__(
+        self,
+        *,
+        request_limit: int,
+        window_seconds: int,
+        block_seconds: int,
+        max_tracked_keys: int = DEFAULT_AUTH_TRACKED_KEYS_MAX,
+    ) -> None:
+        self._request_limit = request_limit
+        self._window_seconds = window_seconds
+        self._block_seconds = block_seconds
+        self._max_tracked_keys = max_tracked_keys
+        self._events: dict[str, deque[float]] = {}
+        self._blocked_until: dict[str, float] = {}
+        self._last_seen: dict[str, float] = {}
+        self._next_cleanup_at = 0.0
+        self._lock = threading.Lock()
+
+    def _prune_events_locked(self, key: str, now: float) -> deque[float]:
+        events = self._events.get(key)
+        if events is None:
+            events = deque()
+            self._events[key] = events
+            return events
+        threshold = now - float(self._window_seconds)
+        while events and events[0] < threshold:
+            events.popleft()
+        if not events:
+            self._events[key] = deque()
+            return self._events[key]
+        return events
+
+    def _touch_locked(self, key: str, now: float) -> None:
+        self._last_seen[key] = now
+        self._enforce_key_cap_locked()
+
+    def _enforce_key_cap_locked(self) -> None:
+        overflow = len(self._last_seen) - self._max_tracked_keys
+        if overflow <= 0:
+            return
+        oldest_keys = sorted(self._last_seen.items(), key=lambda kv: kv[1])[:overflow]
+        for stale_key, _ in oldest_keys:
+            self._last_seen.pop(stale_key, None)
+            self._events.pop(stale_key, None)
+            self._blocked_until.pop(stale_key, None)
+
+    def _cleanup_locked(self, now: float) -> None:
+        tracked = len(self._last_seen)
+        if now < self._next_cleanup_at and tracked <= self._max_tracked_keys:
+            return
+
+        threshold = now - float(self._window_seconds)
+        for key in list(self._blocked_until):
+            if self._blocked_until[key] <= now:
+                self._blocked_until.pop(key, None)
+        for key in list(self._events):
+            events = self._events.get(key)
+            if events is None:
+                continue
+            while events and events[0] < threshold:
+                events.popleft()
+            if not events:
+                self._events.pop(key, None)
+
+        active_keys = set(self._events) | set(self._blocked_until)
+        for key in list(self._last_seen):
+            if key not in active_keys:
+                self._last_seen.pop(key, None)
+
+        self._enforce_key_cap_locked()
+        self._next_cleanup_at = now + DEFAULT_AUTH_CLEANUP_INTERVAL_SECONDS
+
+    def retry_after_seconds(self, key: str, *, now: float | None = None) -> int:
+        current = time.monotonic() if now is None else now
+        with self._lock:
+            blocked_until = self._blocked_until.get(key)
+            if blocked_until is None or blocked_until <= current:
+                return 0
+            remaining = blocked_until - current
+            return max(1, int(remaining) + (0 if remaining.is_integer() else 1))
+
+    def check_and_record(self, key: str, *, now: float | None = None) -> bool:
+        current = time.monotonic() if now is None else now
+        with self._lock:
+            self._cleanup_locked(current)
+            blocked_until = self._blocked_until.get(key)
+            if blocked_until is not None and blocked_until > current:
+                self._touch_locked(key, current)
+                return True
+            if blocked_until is not None and blocked_until <= current:
+                self._blocked_until.pop(key, None)
+
+            events = self._prune_events_locked(key, current)
+            events.append(current)
+            self._touch_locked(key, current)
+            if len(events) > self._request_limit:
+                self._blocked_until[key] = current + float(self._block_seconds)
+                self._events.pop(key, None)
+                return True
+            return False
+
+
 class BoundedThreadingHTTPServer(ThreadingHTTPServer):
     daemon_threads = True
     request_queue_size = DEFAULT_REQUEST_QUEUE_SIZE
@@ -218,9 +329,13 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
         handler_class: type[BaseHTTPRequestHandler],
         *,
         max_concurrent_requests: int,
+        max_concurrent_requests_per_client: int,
         socket_timeout_seconds: float,
     ) -> None:
         self._slots = threading.BoundedSemaphore(max_concurrent_requests)
+        self._max_concurrent_requests_per_client = max_concurrent_requests_per_client
+        self._active_client_counts: dict[str, int] = {}
+        self._client_counts_lock = threading.Lock()
         self._socket_timeout_seconds = socket_timeout_seconds
         super().__init__(server_address, handler_class)
 
@@ -248,8 +363,58 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
         except OSError:
             return
 
+    @staticmethod
+    def _try_send_client_limited_response(request: socket.socket) -> None:
+        body = json.dumps(
+            error_payload("too_many_requests", "too many concurrent requests from this client"),
+            separators=(",", ":"),
+            ensure_ascii=True,
+        ).encode("utf-8")
+        try:
+            request.sendall(
+                b"HTTP/1.1 429 Too Many Requests\r\n"
+                b"Content-Type: application/json; charset=utf-8\r\n"
+                b"Content-Length: " + str(len(body)).encode("ascii") + b"\r\n"
+                b"Retry-After: 1\r\n"
+                b"Connection: close\r\n"
+                b"\r\n"
+                + body
+            )
+        except OSError:
+            return
+
+    @staticmethod
+    def _client_id(client_address: tuple[str, int]) -> str:
+        try:
+            return str(client_address[0])
+        except (IndexError, TypeError):
+            return "unknown"
+
+    def _try_acquire_client_slot(self, client_address: tuple[str, int]) -> bool:
+        client_id = self._client_id(client_address)
+        with self._client_counts_lock:
+            current = self._active_client_counts.get(client_id, 0)
+            if current >= self._max_concurrent_requests_per_client:
+                return False
+            self._active_client_counts[client_id] = current + 1
+            return True
+
+    def _release_client_slot(self, client_address: tuple[str, int]) -> None:
+        client_id = self._client_id(client_address)
+        with self._client_counts_lock:
+            current = self._active_client_counts.get(client_id, 0)
+            if current <= 1:
+                self._active_client_counts.pop(client_id, None)
+                return
+            self._active_client_counts[client_id] = current - 1
+
     def process_request(self, request: socket.socket, client_address: tuple[str, int]) -> None:
+        if not self._try_acquire_client_slot(client_address):
+            self._try_send_client_limited_response(request)
+            self.shutdown_request(request)
+            return
         if not self._slots.acquire(blocking=False):
+            self._release_client_slot(client_address)
             self._try_send_overloaded_response(request)
             self.shutdown_request(request)
             return
@@ -257,6 +422,7 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
             super().process_request(request, client_address)
         except (OSError, RuntimeError) as exc:
             self._slots.release()
+            self._release_client_slot(client_address)
             raise RuntimeError("failed to dispatch request handler thread") from exc
 
     def process_request_thread(self, request: socket.socket, client_address: tuple[str, int]) -> None:
@@ -264,6 +430,7 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
             super().process_request_thread(request, client_address)
         finally:
             self._slots.release()
+            self._release_client_slot(client_address)
 
 
 def _read_token_file(path: str) -> str:
@@ -316,8 +483,20 @@ def _build_config(args: argparse.Namespace) -> APIConfig:
         raise ValueError("max-password-count must be > 0")
     if args.max_username_count <= 0:
         raise ValueError("max-username-count must be > 0")
-    if args.max_concurrent_requests <= 0:
+    max_concurrent_requests = int(getattr(args, "max_concurrent_requests", DEFAULT_MAX_CONCURRENT_REQUESTS))
+    max_concurrent_requests_per_client = int(
+        getattr(args, "max_concurrent_requests_per_client", DEFAULT_MAX_CONCURRENT_REQUESTS_PER_CLIENT)
+    )
+    request_rate_limit = int(getattr(args, "request_rate_limit", DEFAULT_REQUEST_RATE_LIMIT))
+    request_rate_window_seconds = int(getattr(args, "request_rate_window_seconds", DEFAULT_REQUEST_RATE_WINDOW_SECONDS))
+    request_rate_block_seconds = int(getattr(args, "request_rate_block_seconds", DEFAULT_REQUEST_RATE_BLOCK_SECONDS))
+
+    if max_concurrent_requests <= 0:
         raise ValueError("max-concurrent-requests must be > 0")
+    if max_concurrent_requests_per_client <= 0:
+        raise ValueError("max-concurrent-requests-per-client must be > 0")
+    if max_concurrent_requests_per_client > max_concurrent_requests:
+        raise ValueError("max-concurrent-requests-per-client must be <= max-concurrent-requests")
     if args.socket_timeout_seconds <= 0:
         raise ValueError("socket-timeout-seconds must be > 0")
     if args.auth_fail_limit <= 0:
@@ -326,6 +505,12 @@ def _build_config(args: argparse.Namespace) -> APIConfig:
         raise ValueError("auth-fail-window-seconds must be > 0")
     if args.auth_block_seconds <= 0:
         raise ValueError("auth-block-seconds must be > 0")
+    if request_rate_limit <= 0:
+        raise ValueError("request-rate-limit must be > 0")
+    if request_rate_window_seconds <= 0:
+        raise ValueError("request-rate-window-seconds must be > 0")
+    if request_rate_block_seconds <= 0:
+        raise ValueError("request-rate-block-seconds must be > 0")
 
     tls_cert_file = (args.tls_cert_file or "").strip()
     tls_key_file = (args.tls_key_file or "").strip()
@@ -348,11 +533,15 @@ def _build_config(args: argparse.Namespace) -> APIConfig:
         max_body_bytes=args.max_body_bytes,
         max_password_count=args.max_password_count,
         max_username_count=args.max_username_count,
-        max_concurrent_requests=args.max_concurrent_requests,
+        max_concurrent_requests=max_concurrent_requests,
+        max_concurrent_requests_per_client=max_concurrent_requests_per_client,
         socket_timeout_seconds=args.socket_timeout_seconds,
         auth_fail_limit=args.auth_fail_limit,
         auth_fail_window_seconds=args.auth_fail_window_seconds,
         auth_block_seconds=args.auth_block_seconds,
+        request_rate_limit=request_rate_limit,
+        request_rate_window_seconds=request_rate_window_seconds,
+        request_rate_block_seconds=request_rate_block_seconds,
         tls_cert_file=tls_cert_file,
         tls_key_file=tls_key_file,
     )
@@ -363,6 +552,11 @@ def _handler_factory(config: APIConfig) -> type[BaseHTTPRequestHandler]:
         fail_limit=config.auth_fail_limit,
         window_seconds=config.auth_fail_window_seconds,
         block_seconds=config.auth_block_seconds,
+    )
+    request_throttle = RequestRateThrottle(
+        request_limit=config.request_rate_limit,
+        window_seconds=config.request_rate_window_seconds,
+        block_seconds=config.request_rate_block_seconds,
     )
 
     class Handler(BaseHTTPRequestHandler):
@@ -415,6 +609,23 @@ def _handler_factory(config: APIConfig) -> type[BaseHTTPRequestHandler]:
         def _request_path(self) -> str:
             return urlsplit(self.path).path
 
+        def _request_throttle_key(self, *, path: str) -> str:
+            route = self._route_throttle_key(path)
+            return f"{self._client_identity()}|{route}"
+
+        def _enforce_request_rate(self, *, path: str) -> bool:
+            throttle_key = self._request_throttle_key(path=path)
+            if not request_throttle.check_and_record(throttle_key):
+                return True
+            retry_after = request_throttle.retry_after_seconds(throttle_key)
+            self._write_json(
+                429,
+                error_payload("too_many_requests", "request rate exceeded; retry later"),
+                close=True,
+                headers={"Retry-After": str(max(1, retry_after))},
+            )
+            return False
+
         def _presented_bearer_token(self) -> str | None:
             auth_header = self.headers.get("Authorization", "")
             parts = auth_header.split(None, 1)
@@ -446,6 +657,10 @@ def _handler_factory(config: APIConfig) -> type[BaseHTTPRequestHandler]:
                 ).hexdigest()[:24]
             return f"{self._client_identity()}|{route}|{token_fp}"
 
+        def _auth_route_key(self, *, path: str) -> str:
+            route = self._route_throttle_key(path)
+            return f"{self._client_identity()}|{route}|__route__"
+
         @staticmethod
         def _is_authorized(presented_token: str | None, *, expected_token: str) -> bool:
             if presented_token is None:
@@ -463,27 +678,30 @@ def _handler_factory(config: APIConfig) -> type[BaseHTTPRequestHandler]:
             media_type = content_type.split(";", 1)[0].strip().lower()
             return media_type == "application/json"
 
-        def _write_not_found(self) -> None:
-            self._write_json(404, error_payload("not_found", "endpoint not found"))
+        def _write_not_found(self, *, close: bool = False) -> None:
+            self._write_json(404, error_payload("not_found", "endpoint not found"), close=close)
 
-        def _write_method_not_allowed(self, path: str) -> None:
+        def _write_method_not_allowed(self, path: str, *, close: bool = False) -> None:
             allowed = KNOWN_ENDPOINT_METHODS.get(path)
             if not allowed:
-                self._write_not_found()
+                self._write_not_found(close=close)
                 return
             self._write_json(
                 405,
                 error_payload("method_not_allowed", "method not allowed"),
+                close=close,
                 headers={"Allow": ", ".join(allowed)},
             )
 
         def _handle_non_get_post(self) -> None:
             try:
                 path = self._request_path()
-                if path in KNOWN_ENDPOINT_METHODS:
-                    self._write_method_not_allowed(path)
+                if not self._enforce_request_rate(path=path):
                     return
-                self._write_not_found()
+                if path in KNOWN_ENDPOINT_METHODS:
+                    self._write_method_not_allowed(path, close=True)
+                    return
+                self._write_not_found(close=True)
             except (OSError, RuntimeError, ValueError, UnicodeError) as exc:
                 self._write_internal_error(exc)
 
@@ -522,6 +740,8 @@ def _handler_factory(config: APIConfig) -> type[BaseHTTPRequestHandler]:
         def do_GET(self) -> None:
             try:
                 path = self._request_path()
+                if not self._enforce_request_rate(path=path):
+                    return
                 if path == "/healthz":
                     self._write_json(200, {"status": "ok"})
                     return
@@ -535,6 +755,8 @@ def _handler_factory(config: APIConfig) -> type[BaseHTTPRequestHandler]:
         def do_POST(self) -> None:
             try:
                 path = self._request_path()
+                if not self._enforce_request_rate(path=path):
+                    return
                 if path not in ("/v1/passwords", "/v1/usernames"):
                     if path in KNOWN_ENDPOINT_METHODS:
                         self._write_method_not_allowed(path)
@@ -544,30 +766,41 @@ def _handler_factory(config: APIConfig) -> type[BaseHTTPRequestHandler]:
 
                 presented_token = self._presented_bearer_token()
                 client_key = self._auth_throttle_key(path=path, presented_token=presented_token)
-                if auth_throttle.is_blocked(client_key):
-                    self._write_json(
-                        429,
-                        error_payload(
-                            "too_many_auth_failures",
-                            "authentication temporarily blocked after repeated failures",
-                        ),
-                    )
-                    return
+                route_key = self._auth_route_key(path=path)
+                is_authorized = self._is_authorized(presented_token, expected_token=config.token)
 
-                if not self._is_authorized(presented_token, expected_token=config.token):
-                    if auth_throttle.record_failure(client_key):
+                if not is_authorized:
+                    if auth_throttle.is_blocked(client_key) or auth_throttle.is_blocked(route_key):
                         self._write_json(
                             429,
                             error_payload(
                                 "too_many_auth_failures",
                                 "authentication temporarily blocked after repeated failures",
                             ),
+                            close=True,
                         )
-                    else:
-                        self._write_json(401, error_payload("unauthorized", "missing or invalid bearer token"))
+                        return
+                    blocked_client = auth_throttle.record_failure(client_key)
+                    blocked_route = auth_throttle.record_failure(route_key)
+                    if blocked_client or blocked_route:
+                        self._write_json(
+                            429,
+                            error_payload(
+                                "too_many_auth_failures",
+                                "authentication temporarily blocked after repeated failures",
+                            ),
+                            close=True,
+                        )
+                        return
+                    self._write_json(
+                        401,
+                        error_payload("unauthorized", "missing or invalid bearer token"),
+                        close=True,
+                    )
                     return
 
                 auth_throttle.reset(client_key)
+                auth_throttle.reset(route_key)
 
                 try:
                     payload = self._read_json_payload()
@@ -670,6 +903,7 @@ def create_server(config: APIConfig) -> ThreadingHTTPServer:
         (config.host, config.port),
         handler,
         max_concurrent_requests=config.max_concurrent_requests,
+        max_concurrent_requests_per_client=config.max_concurrent_requests_per_client,
         socket_timeout_seconds=config.socket_timeout_seconds,
     )
     if config.tls_cert_file:
@@ -745,6 +979,17 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--max-concurrent-requests-per-client",
+        type=int,
+        default=_parse_int(
+            os.environ.get(
+                "USNPW_API_MAX_CONCURRENT_REQUESTS_PER_CLIENT",
+                str(DEFAULT_MAX_CONCURRENT_REQUESTS_PER_CLIENT),
+            ),
+            "USNPW_API_MAX_CONCURRENT_REQUESTS_PER_CLIENT",
+        ),
+    )
+    parser.add_argument(
         "--socket-timeout-seconds",
         type=float,
         default=_parse_float(
@@ -774,6 +1019,30 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=_parse_int(
             os.environ.get("USNPW_API_AUTH_BLOCK_SECONDS", str(DEFAULT_AUTH_BLOCK_SECONDS)),
             "USNPW_API_AUTH_BLOCK_SECONDS",
+        ),
+    )
+    parser.add_argument(
+        "--request-rate-limit",
+        type=int,
+        default=_parse_int(
+            os.environ.get("USNPW_API_REQUEST_RATE_LIMIT", str(DEFAULT_REQUEST_RATE_LIMIT)),
+            "USNPW_API_REQUEST_RATE_LIMIT",
+        ),
+    )
+    parser.add_argument(
+        "--request-rate-window-seconds",
+        type=int,
+        default=_parse_int(
+            os.environ.get("USNPW_API_REQUEST_RATE_WINDOW_SECONDS", str(DEFAULT_REQUEST_RATE_WINDOW_SECONDS)),
+            "USNPW_API_REQUEST_RATE_WINDOW_SECONDS",
+        ),
+    )
+    parser.add_argument(
+        "--request-rate-block-seconds",
+        type=int,
+        default=_parse_int(
+            os.environ.get("USNPW_API_REQUEST_RATE_BLOCK_SECONDS", str(DEFAULT_REQUEST_RATE_BLOCK_SECONDS)),
+            "USNPW_API_REQUEST_RATE_BLOCK_SECONDS",
         ),
     )
     parser.add_argument("--tls-cert-file", default=os.environ.get("USNPW_API_TLS_CERT_FILE", ""))

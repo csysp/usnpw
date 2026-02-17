@@ -131,11 +131,47 @@ Rules: `--bytes > 0` overrides `--bits`; `--bits` must be a multiple of `8`; gro
 `scripts/usnpw_gui.py` uses the same service layer as CLI. The GUI safety model combines hardened safe-mode defaults, strict/session-only controls, copy guard, auto-clear timers, panic clear, encrypted export, and unsafe-path blocking for file-destructive actions.
 
 ## Container Operations Hardening
-In API mode, defaults favor no persistence. If you relax those controls, keep token, blacklist, and stream-state paths scoped per tenant/profile and define writer coordination explicitly.
+In API mode, request envelopes are strict and persistence-sensitive fields are policy-locked. Username/path persistence overrides in request payloads are rejected by design, and runtime defaults keep persistence disabled.
 
 Default to a single replica unless you have a formal shared-state strategy. Multi-replica deployments require explicit lock semantics, profile/state affinity, and saturation testing before production.
 
 Use file-backed token secrets (`USNPW_API_TOKEN_FILE`) instead of plaintext environment injection whenever possible, rotate tokens on schedule, and treat access logs as sensitive metadata.
+
+For load-abuse resistance, keep per-client concurrency and request-rate controls enabled. Tune with:
+- `USNPW_API_MAX_CONCURRENT_REQUESTS_PER_CLIENT`
+- `USNPW_API_REQUEST_RATE_LIMIT`
+- `USNPW_API_REQUEST_RATE_WINDOW_SECONDS`
+- `USNPW_API_REQUEST_RATE_BLOCK_SECONDS`
+
+## API Hardening and Runtime Controls
+### Endpoint Contract
+- `GET /healthz` for basic health checks.
+- `POST /v1/passwords` and `POST /v1/usernames` for generation requests.
+- API responses are strict JSON envelopes, including `4xx` and `5xx` failures.
+
+### Authentication and Token Handling
+- Bearer token auth is required for generation endpoints.
+- Prefer `USNPW_API_TOKEN_FILE` for secret injection.
+- `USNPW_API_TOKEN` and CLI token flags are opt-in and disabled by default.
+- Auth-failure throttling keys are composite and route-aware to resist token spray patterns.
+
+### Request Envelope Policy
+- Unknown fields are rejected.
+- Policy-locked username controls are rejected in API mode.
+- BIP39 password fields are rejected in API mode.
+- Payloads must be UTF-8 JSON objects with `Content-Type: application/json`.
+
+### Load and Abuse Mitigations
+- Global concurrent worker cap: `USNPW_API_MAX_CONCURRENT_REQUESTS`.
+- Per-client concurrent cap: `USNPW_API_MAX_CONCURRENT_REQUESTS_PER_CLIENT`.
+- Route-scoped request-rate limiting with block windows: `USNPW_API_REQUEST_RATE_LIMIT`, `USNPW_API_REQUEST_RATE_WINDOW_SECONDS`, `USNPW_API_REQUEST_RATE_BLOCK_SECONDS`.
+- Rate and concurrency violations return JSON `429` with `Retry-After`.
+- Over-capacity worker saturation returns JSON `503`.
+
+### Deployment Notes
+- Keep API deployment private unless you provide trusted TLS termination.
+- For direct TLS in-process, set both `USNPW_API_TLS_CERT_FILE` and `USNPW_API_TLS_KEY_FILE`.
+- Treat access logs as sensitive metadata and keep them disabled unless needed.
 
 ## Troubleshooting
 ### `bits must be a multiple of 8`

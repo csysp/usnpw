@@ -18,6 +18,29 @@ _PASSWORD_FIELDS = _allowed_field_names(PasswordRequest)
 _USERNAME_FIELDS = _allowed_field_names(UsernameRequest)
 API_DEFAULT_USERNAME_BLACKLIST = str(Path(".usnpw_api_usernames.txt"))
 API_DEFAULT_TOKEN_BLACKLIST = str(Path(".usnpw_api_tokens.txt"))
+API_RESTRICTED_PASSWORD_FIELDS = ("bip39_wordlist", "words", "delim")
+API_RESTRICTED_USERNAME_FIELDS = (
+    "safe_mode",
+    "uniqueness_mode",
+    "blacklist",
+    "no_save",
+    "token_blacklist",
+    "no_token_save",
+    "no_token_block",
+    "stream_save_tokens",
+    "stream_state",
+    "stream_state_persist",
+    "allow_plaintext_stream_state",
+    "no_leading_digit",
+    "max_scheme_pct",
+    "history",
+    "pool_scale",
+    "initials_weight",
+    "show_meta",
+)
+API_MAX_PASSWORD_LENGTH = 4096
+API_MAX_PASSWORD_ENTROPY_BYTES = 1024
+API_MAX_PASSWORD_BITS = API_MAX_PASSWORD_ENTROPY_BYTES * 8
 
 
 def _ensure_object(payload: Mapping[str, Any] | Any, label: str) -> Mapping[str, Any]:
@@ -105,9 +128,22 @@ def _require_count_limit(count: int, *, field: str, max_count: int) -> None:
         raise ValueError(f"{field} must be <= {max_count}")
 
 
+def _reject_restricted_fields(payload: Mapping[str, Any], *, label: str, fields: Sequence[str]) -> None:
+    disallowed = [field for field in fields if field in payload]
+    if not disallowed:
+        return
+    joined = ", ".join(disallowed)
+    raise ValueError(f"{label} payload fields are not configurable in API mode: {joined}")
+
+
 def build_password_request(payload: Mapping[str, Any] | Any, *, max_count: int = 512) -> PasswordRequest:
     data = _ensure_object(payload, "password")
     _reject_unknown_fields(data, _PASSWORD_FIELDS, "password")
+    _reject_restricted_fields(data, label="password", fields=API_RESTRICTED_PASSWORD_FIELDS)
+
+    request_format = _parse_str(data.get("format", "password"), "format")
+    if request_format == "bip39":
+        raise ValueError("password format 'bip39' is disabled in API mode")
 
     request = PasswordRequest(
         count=_parse_int(data.get("count", 1), "count"),
@@ -116,7 +152,7 @@ def build_password_request(payload: Mapping[str, Any] | Any, *, max_count: int =
         symbols=_parse_str(data.get("symbols", "!@#$%^&*()-_=+[]{};:,?/"), "symbols"),
         no_symbols=_parse_bool(data.get("no_symbols", False), "no_symbols"),
         max_entropy=_parse_bool(data.get("max_entropy", False), "max_entropy"),
-        format=_parse_str(data.get("format", "password"), "format"),
+        format=request_format,
         entropy_bytes=_parse_int(data.get("entropy_bytes", 0), "entropy_bytes"),
         bits=_parse_int(data.get("bits", 0), "bits"),
         out_enc=_parse_str(data.get("out_enc", "hex"), "out_enc"),
@@ -125,15 +161,28 @@ def build_password_request(payload: Mapping[str, Any] | Any, *, max_count: int =
         group_pad=_parse_str(data.get("group_pad", ""), "group_pad"),
         words=_parse_int(data.get("words", 24), "words"),
         delim=_parse_str(data.get("delim", " "), "delim"),
-        bip39_wordlist=_parse_str(data.get("bip39_wordlist", ""), "bip39_wordlist").strip(),
+        bip39_wordlist="",
     )
     _require_count_limit(request.count, field="count", max_count=max_count)
+    if request.length <= 0:
+        raise ValueError("length must be > 0")
+    if request.length > API_MAX_PASSWORD_LENGTH:
+        raise ValueError(f"length must be <= {API_MAX_PASSWORD_LENGTH}")
+    if request.entropy_bytes < 0:
+        raise ValueError("entropy_bytes must be >= 0")
+    if request.entropy_bytes > API_MAX_PASSWORD_ENTROPY_BYTES:
+        raise ValueError(f"entropy_bytes must be <= {API_MAX_PASSWORD_ENTROPY_BYTES}")
+    if request.bits < 0:
+        raise ValueError("bits must be >= 0")
+    if request.bits > API_MAX_PASSWORD_BITS:
+        raise ValueError(f"bits must be <= {API_MAX_PASSWORD_BITS}")
     return request
 
 
 def build_username_request(payload: Mapping[str, Any] | Any, *, max_count: int = 512) -> UsernameRequest:
     data = _ensure_object(payload, "username")
     _reject_unknown_fields(data, _USERNAME_FIELDS, "username")
+    _reject_restricted_fields(data, label="username", fields=API_RESTRICTED_USERNAME_FIELDS)
 
     request = UsernameRequest(
         count=_parse_int(data.get("count", 10), "count"),
@@ -142,13 +191,13 @@ def build_username_request(payload: Mapping[str, Any] | Any, *, max_count: int =
         profile=_parse_str(data.get("profile", "generic"), "profile"),
         safe_mode=_parse_bool(data.get("safe_mode", False), "safe_mode"),
         uniqueness_mode=_parse_str(data.get("uniqueness_mode", "stream"), "uniqueness_mode"),
-        blacklist=_parse_str(data.get("blacklist", API_DEFAULT_USERNAME_BLACKLIST), "blacklist").strip(),
+        blacklist=API_DEFAULT_USERNAME_BLACKLIST,
         no_save=_parse_bool(data.get("no_save", True), "no_save"),
-        token_blacklist=_parse_str(data.get("token_blacklist", API_DEFAULT_TOKEN_BLACKLIST), "token_blacklist").strip(),
+        token_blacklist=API_DEFAULT_TOKEN_BLACKLIST,
         no_token_save=_parse_bool(data.get("no_token_save", True), "no_token_save"),
         no_token_block=_parse_bool(data.get("no_token_block", False), "no_token_block"),
         stream_save_tokens=_parse_bool(data.get("stream_save_tokens", False), "stream_save_tokens"),
-        stream_state=_parse_str(data.get("stream_state", ""), "stream_state").strip(),
+        stream_state="",
         stream_state_persist=_parse_bool(data.get("stream_state_persist", True), "stream_state_persist"),
         allow_plaintext_stream_state=_parse_bool(
             data.get("allow_plaintext_stream_state", False),

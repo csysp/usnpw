@@ -30,16 +30,37 @@ class APIAdapterTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "count must be <= 2"):
             build_password_request({"count": 3}, max_count=2)
 
+    def test_password_request_rejects_bip39_wordlist_even_when_empty(self) -> None:
+        with self.assertRaisesRegex(ValueError, "not configurable in API mode"):
+            build_password_request({"count": 1, "bip39_wordlist": ""})
+
+    def test_password_request_rejects_bip39_only_fields(self) -> None:
+        with self.assertRaisesRegex(ValueError, "not configurable in API mode"):
+            build_password_request({"count": 1, "words": 24})
+        with self.assertRaisesRegex(ValueError, "not configurable in API mode"):
+            build_password_request({"count": 1, "delim": "-"})
+
+    def test_password_request_rejects_bip39_format(self) -> None:
+        with self.assertRaisesRegex(ValueError, "format 'bip39' is disabled"):
+            build_password_request({"count": 1, "format": "bip39"})
+
+    def test_password_request_enforces_length_cap(self) -> None:
+        with self.assertRaisesRegex(ValueError, "length must be <= 4096"):
+            build_password_request({"count": 1, "length": 4097})
+
+    def test_password_request_enforces_entropy_byte_cap(self) -> None:
+        with self.assertRaisesRegex(ValueError, "entropy_bytes must be <= 1024"):
+            build_password_request({"count": 1, "entropy_bytes": 1025})
+
+    def test_password_request_enforces_bits_cap(self) -> None:
+        with self.assertRaisesRegex(ValueError, "bits must be <= 8192"):
+            build_password_request({"count": 1, "bits": 8193})
+
     def test_username_request_enforces_hardened_fields(self) -> None:
         request = build_username_request(
             {
                 "count": 2,
                 "profile": "reddit",
-                "safe_mode": False,
-                "no_save": False,
-                "no_token_save": False,
-                "no_leading_digit": False,
-                "show_meta": True,
                 "disallow_prefix": ["admin", "mod"],
             },
             max_count=10,
@@ -54,6 +75,12 @@ class APIAdapterTests(unittest.TestCase):
         self.assertFalse(request.allow_plaintext_stream_state)
         self.assertFalse(request.stream_state_persist)
 
+    def test_username_request_rejects_policy_locked_fields(self) -> None:
+        with self.assertRaisesRegex(ValueError, "not configurable in API mode"):
+            build_username_request({"count": 1, "no_save": False})
+        with self.assertRaisesRegex(ValueError, "not configurable in API mode"):
+            build_username_request({"count": 1, "uniqueness_mode": "blacklist"})
+
     def test_username_request_rejects_unknown_field(self) -> None:
         with self.assertRaisesRegex(ValueError, "unknown fields"):
             build_username_request({"count": 1, "bad_field": "x"})
@@ -61,6 +88,10 @@ class APIAdapterTests(unittest.TestCase):
     def test_username_request_enforces_count_cap(self) -> None:
         with self.assertRaisesRegex(ValueError, "count must be <= 2"):
             build_username_request({"count": 3}, max_count=2)
+
+    def test_username_request_rejects_restricted_path_fields_even_if_blank(self) -> None:
+        with self.assertRaisesRegex(ValueError, "not configurable in API mode"):
+            build_username_request({"count": 1, "blacklist": ""})
 
     def test_payload_must_be_json_object(self) -> None:
         with self.assertRaisesRegex(ValueError, "payload must be a JSON object"):
