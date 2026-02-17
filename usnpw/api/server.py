@@ -39,6 +39,7 @@ DEFAULT_REQUEST_RATE_BLOCK_SECONDS = 30
 DEFAULT_REQUEST_QUEUE_SIZE = 256
 DEFAULT_AUTH_TRACKED_KEYS_MAX = 8192
 DEFAULT_AUTH_CLEANUP_INTERVAL_SECONDS = 30.0
+DEFAULT_MIN_TOKEN_LENGTH = 24
 KNOWN_ENDPOINT_METHODS: dict[str, tuple[str, ...]] = {
     "/healthz": ("GET",),
     "/v1/passwords": ("POST",),
@@ -474,6 +475,10 @@ def _build_config(args: argparse.Namespace) -> APIConfig:
             "USNPW_API_TOKEN_FILE is required "
             "(or use USNPW_API_TOKEN with --allow-env-token, or opt in to --token with --allow-cli-token)"
         )
+    if len(token) < DEFAULT_MIN_TOKEN_LENGTH:
+        raise ValueError(
+            f"token must be at least {DEFAULT_MIN_TOKEN_LENGTH} characters; use a random 32+ character token"
+        )
 
     if args.port <= 0:
         raise ValueError("port must be > 0")
@@ -593,14 +598,17 @@ def _handler_factory(config: APIConfig) -> type[BaseHTTPRequestHandler]:
         def _write_internal_error(self, exc: BaseException | None = None) -> None:
             try:
                 if exc is not None:
-                    sys.stderr.write(
-                        format_error_text(
-                            exc,
-                            default_code="internal_error",
-                            default_message="internal server error",
+                    if os.environ.get("USNPW_API_VERBOSE_ERRORS", "").strip().lower() in ("1", "true", "yes", "on"):
+                        sys.stderr.write(
+                            format_error_text(
+                                exc,
+                                default_code="internal_error",
+                                default_message="internal server error",
+                            )
+                            + "\n"
                         )
-                        + "\n"
-                    )
+                    else:
+                        sys.stderr.write(f"internal_error: {exc.__class__.__name__}\n")
                 self._write_json(500, error_payload("internal_error", "internal server error"))
             except OSError:
                 # Client may have disconnected before receiving the response.

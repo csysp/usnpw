@@ -87,6 +87,13 @@ class CliArgTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertIn("USnPw unified CLI", stdout.getvalue())
 
+    def test_usnpw_cli_unknown_subcommand_hard_fails(self) -> None:
+        stderr = io.StringIO()
+        with redirect_stderr(stderr):
+            rc = usnpw_main(["usernmae", "-n", "1"])
+        self.assertEqual(rc, 2)
+        self.assertIn("unknown command", stderr.getvalue().lower())
+
 
 if __name__ == "__main__":
     unittest.main()

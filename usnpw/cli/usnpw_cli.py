@@ -40,7 +40,13 @@ def main(argv: list[str] | None = None) -> int:
         return password_main(tail)
     if command in _USERNAME_ALIASES:
         return username_main(tail)
-    return password_main(args)
+    if command.startswith("-"):
+        return password_main(args)
+    print(
+        f"unknown command: {args[0]!r}. Use 'usnpw --help' for usage.",
+        file=sys.stderr,
+    )
+    return 2
 
 
 if __name__ == "__main__":

@@ -1,16 +1,21 @@
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import os
 import threading
 import unittest
 import urllib.error
 import urllib.request
+from contextlib import redirect_stderr
 from pathlib import Path
 from unittest.mock import patch
 
 from usnpw.api.server import APIConfig, AuthThrottle, _build_config, create_server
+
+LONG_TEST_TOKEN = "0123456789abcdef0123456789abcdef"
+SHORT_TEST_TOKEN = "short-token"
 
 
 class APIServerTests(unittest.TestCase):
@@ -37,7 +42,7 @@ class APIServerTests(unittest.TestCase):
         cls._config = APIConfig(
             host="127.0.0.1",
             port=0,
-            token="test-token",
+            token=LONG_TEST_TOKEN,
             max_body_bytes=1024,
             max_password_count=20,
             max_username_count=20,
@@ -132,7 +137,7 @@ class APIServerTests(unittest.TestCase):
             "POST",
             "/v1/passwords",
             payload={"count": 2, "length": 12, "format": "password"},
-            token="test-token",
+            token=LONG_TEST_TOKEN,
         )
         self.assertEqual(status, 200)
         outputs = payload.get("outputs")
@@ -144,7 +149,7 @@ class APIServerTests(unittest.TestCase):
             "POST",
             "/v1/usernames",
             payload={"count": 3, "profile": "reddit"},
-            token="test-token",
+            token=LONG_TEST_TOKEN,
         )
         self.assertEqual(status, 200)
         usernames = payload.get("usernames")
@@ -158,7 +163,7 @@ class APIServerTests(unittest.TestCase):
             "POST",
             "/v1/passwords",
             payload=b"{",
-            token="test-token",
+            token=LONG_TEST_TOKEN,
         )
         self.assertEqual(status, 400)
         self.assertIn("error", payload)
@@ -168,7 +173,7 @@ class APIServerTests(unittest.TestCase):
             "POST",
             "/v1/passwords",
             payload=(b"{" + (b"a" * 2048) + b"}"),
-            token="test-token",
+            token=LONG_TEST_TOKEN,
         )
         self.assertEqual(status, 413)
         self.assertIn("error", payload)
@@ -178,7 +183,7 @@ class APIServerTests(unittest.TestCase):
             "POST",
             "/v1/passwords",
             payload={"count": 1},
-            token="test-token",
+            token=LONG_TEST_TOKEN,
             content_type="application/jsonx",
         )
         self.assertEqual(status, 400)
@@ -195,7 +200,7 @@ class APIServerTests(unittest.TestCase):
             "PUT",
             "/v1/passwords",
             payload={"count": 1},
-            token="test-token",
+            token=LONG_TEST_TOKEN,
         )
         self.assertEqual(status, 405)
         self.assertEqual(self._error_code(payload), "method_not_allowed")
@@ -397,11 +402,26 @@ class APIServerTests(unittest.TestCase):
 
                 # Use a body-less request for the contending call to avoid a Windows-specific
                 # client send-abort race when the server rejects at accept-time.
-                status2, payload2 = self._request(
-                    "GET",
-                    "/healthz",
-                    port=port,
-                )
+                status2 = 429
+                payload2: dict[str, object] = {"error": {"code": "too_many_requests"}}
+                for attempt in range(3):
+                    try:
+                        status2, payload2 = self._request(
+                            "GET",
+                            "/healthz",
+                            port=port,
+                        )
+                        break
+                    except ConnectionAbortedError:
+                        if attempt == 2:
+                            break
+                        continue
+                    except urllib.error.URLError as exc:
+                        if not isinstance(exc.reason, ConnectionAbortedError):
+                            raise
+                        if attempt == 2:
+                            break
+                        continue
                 self.assertEqual(status2, 429)
                 self.assertEqual(self._error_code(payload2), "too_many_requests")
 
@@ -418,7 +438,7 @@ class APIServerTests(unittest.TestCase):
     def test_build_config_reads_token_file(self) -> None:
         token_file = Path(".tmp_api_token_file.txt")
         try:
-            token_file.write_text("file-token\n", encoding="utf-8")
+            token_file.write_text(f"{LONG_TEST_TOKEN}\n", encoding="utf-8")
             args = argparse.Namespace(
                 host="127.0.0.1",
                 port=8080,
@@ -441,12 +461,12 @@ class APIServerTests(unittest.TestCase):
                 allow_cli_token=False,
             )
             config = _build_config(args)
-            self.assertEqual(config.token, "file-token")
+            self.assertEqual(config.token, LONG_TEST_TOKEN)
         finally:
             token_file.unlink(missing_ok=True)
 
     def test_build_config_rejects_env_token_without_opt_in(self) -> None:
-        with patch.dict(os.environ, {"USNPW_API_TOKEN": "env-token"}, clear=False):
+        with patch.dict(os.environ, {"USNPW_API_TOKEN": LONG_TEST_TOKEN}, clear=False):
             args = argparse.Namespace(
                 host="127.0.0.1",
                 port=8080,
@@ -472,7 +492,7 @@ class APIServerTests(unittest.TestCase):
                 _build_config(args)
 
     def test_build_config_allows_env_token_with_opt_in(self) -> None:
-        with patch.dict(os.environ, {"USNPW_API_TOKEN": "env-token"}, clear=False):
+        with patch.dict(os.environ, {"USNPW_API_TOKEN": LONG_TEST_TOKEN}, clear=False):
             args = argparse.Namespace(
                 host="127.0.0.1",
                 port=8080,
@@ -495,13 +515,13 @@ class APIServerTests(unittest.TestCase):
                 allow_cli_token=False,
             )
             config = _build_config(args)
-            self.assertEqual(config.token, "env-token")
+            self.assertEqual(config.token, LONG_TEST_TOKEN)
 
     def test_build_config_rejects_cli_token_without_opt_in(self) -> None:
         args = argparse.Namespace(
             host="127.0.0.1",
             port=8080,
-            token="cli-token",
+            token=SHORT_TEST_TOKEN,
             token_file="",
             max_body_bytes=1024,
             max_password_count=10,
@@ -526,7 +546,7 @@ class APIServerTests(unittest.TestCase):
         args = argparse.Namespace(
             host="127.0.0.1",
             port=8080,
-            token="cli-token",
+            token=LONG_TEST_TOKEN,
             token_file="",
             max_body_bytes=1024,
             max_password_count=10,
@@ -545,13 +565,13 @@ class APIServerTests(unittest.TestCase):
             allow_cli_token=True,
         )
         config = _build_config(args)
-        self.assertEqual(config.token, "cli-token")
+        self.assertEqual(config.token, LONG_TEST_TOKEN)
 
     def test_build_config_rejects_per_client_concurrency_over_global(self) -> None:
         args = argparse.Namespace(
             host="127.0.0.1",
             port=8080,
-            token="cli-token",
+            token=LONG_TEST_TOKEN,
             token_file="",
             max_body_bytes=1024,
             max_password_count=10,
@@ -573,16 +593,59 @@ class APIServerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "max-concurrent-requests-per-client must be <= max-concurrent-requests"):
             _build_config(args)
 
+    def test_build_config_rejects_short_cli_token_even_with_opt_in(self) -> None:
+        args = argparse.Namespace(
+            host="127.0.0.1",
+            port=8080,
+            token=SHORT_TEST_TOKEN,
+            token_file="",
+            max_body_bytes=1024,
+            max_password_count=10,
+            max_username_count=10,
+            max_concurrent_requests=32,
+            max_concurrent_requests_per_client=8,
+            socket_timeout_seconds=5.0,
+            auth_fail_limit=5,
+            auth_fail_window_seconds=60,
+            auth_block_seconds=120,
+            request_rate_limit=240,
+            request_rate_window_seconds=10,
+            request_rate_block_seconds=30,
+            tls_cert_file="",
+            tls_key_file="",
+            allow_env_token=False,
+            allow_cli_token=True,
+        )
+        with self.assertRaisesRegex(ValueError, "token must be at least"):
+            _build_config(args)
+
     def test_internal_error_returns_json_500(self) -> None:
         with patch("usnpw.api.server.generate_passwords", side_effect=RuntimeError("boom")):
             status, payload = self._request(
                 "POST",
                 "/v1/passwords",
                 payload={"count": 1, "length": 12, "format": "password"},
-                token="test-token",
+                token=LONG_TEST_TOKEN,
             )
         self.assertEqual(status, 500)
         self.assertEqual(self._error_code(payload), "internal_error")
+
+    def test_internal_error_logs_are_sanitized_by_default(self) -> None:
+        stderr = io.StringIO()
+        with patch("usnpw.api.server.generate_passwords", side_effect=RuntimeError("boom secret details")):
+            with patch.dict(os.environ, {"USNPW_API_VERBOSE_ERRORS": "0"}, clear=False):
+                with redirect_stderr(stderr):
+                    status, payload = self._request(
+                        "POST",
+                        "/v1/passwords",
+                        payload={"count": 1, "length": 12, "format": "password"},
+                        token=LONG_TEST_TOKEN,
+                    )
+        self.assertEqual(status, 500)
+        self.assertEqual(self._error_code(payload), "internal_error")
+        log_text = stderr.getvalue().lower()
+        self.assertIn("internal_error", log_text)
+        self.assertNotIn("boom secret details", log_text)
 
     def test_auth_throttle_caps_tracked_key_cardinality(self) -> None:
         throttle = AuthThrottle(

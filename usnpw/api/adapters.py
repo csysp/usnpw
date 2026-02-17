@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import fields, replace
+from dataclasses import fields
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -18,6 +18,11 @@ _PASSWORD_FIELDS = _allowed_field_names(PasswordRequest)
 _USERNAME_FIELDS = _allowed_field_names(UsernameRequest)
 API_DEFAULT_USERNAME_BLACKLIST = str(Path(".usnpw_api_usernames.txt"))
 API_DEFAULT_TOKEN_BLACKLIST = str(Path(".usnpw_api_tokens.txt"))
+API_HARDENED_UNIQUENESS_MODE = "stream"
+API_HARDENED_MAX_SCHEME_PCT = 0.28
+API_HARDENED_HISTORY = 10
+API_HARDENED_POOL_SCALE = 4
+API_HARDENED_INITIALS_WEIGHT = 0.0
 API_RESTRICTED_PASSWORD_FIELDS = ("bip39_wordlist", "words", "delim")
 API_RESTRICTED_USERNAME_FIELDS = (
     "safe_mode",
@@ -189,43 +194,28 @@ def build_username_request(payload: Mapping[str, Any] | Any, *, max_count: int =
         min_len=_parse_int(data.get("min_len", 8), "min_len"),
         max_len=_parse_int(data.get("max_len", 16), "max_len"),
         profile=_parse_str(data.get("profile", "generic"), "profile"),
-        safe_mode=_parse_bool(data.get("safe_mode", False), "safe_mode"),
-        uniqueness_mode=_parse_str(data.get("uniqueness_mode", "stream"), "uniqueness_mode"),
+        safe_mode=True,
+        uniqueness_mode=API_HARDENED_UNIQUENESS_MODE,
         blacklist=API_DEFAULT_USERNAME_BLACKLIST,
-        no_save=_parse_bool(data.get("no_save", True), "no_save"),
+        no_save=True,
         token_blacklist=API_DEFAULT_TOKEN_BLACKLIST,
-        no_token_save=_parse_bool(data.get("no_token_save", True), "no_token_save"),
-        no_token_block=_parse_bool(data.get("no_token_block", False), "no_token_block"),
-        stream_save_tokens=_parse_bool(data.get("stream_save_tokens", False), "stream_save_tokens"),
+        no_token_save=True,
+        no_token_block=False,
+        stream_save_tokens=False,
         stream_state="",
-        stream_state_persist=_parse_bool(data.get("stream_state_persist", True), "stream_state_persist"),
-        allow_plaintext_stream_state=_parse_bool(
-            data.get("allow_plaintext_stream_state", False),
-            "allow_plaintext_stream_state",
-        ),
+        stream_state_persist=False,
+        allow_plaintext_stream_state=False,
         disallow_prefix=_parse_str_tuple(data.get("disallow_prefix", ()), "disallow_prefix"),
         disallow_substring=_parse_str_tuple(data.get("disallow_substring", ()), "disallow_substring"),
-        no_leading_digit=_parse_bool(data.get("no_leading_digit", True), "no_leading_digit"),
-        max_scheme_pct=_parse_float(data.get("max_scheme_pct", 0.28), "max_scheme_pct"),
-        history=_parse_int(data.get("history", 10), "history"),
-        pool_scale=_parse_int(data.get("pool_scale", 4), "pool_scale"),
-        initials_weight=_parse_float(data.get("initials_weight", 0.0), "initials_weight"),
-        show_meta=_parse_bool(data.get("show_meta", False), "show_meta"),
-    )
-    _require_count_limit(request.count, field="count", max_count=max_count)
-
-    # API mode enforces hardened defaults by policy.
-    return replace(
-        request,
-        safe_mode=True,
-        no_save=True,
-        no_token_save=True,
-        stream_state_persist=False,
-        stream_state="",
         no_leading_digit=True,
-        allow_plaintext_stream_state=False,
+        max_scheme_pct=API_HARDENED_MAX_SCHEME_PCT,
+        history=API_HARDENED_HISTORY,
+        pool_scale=API_HARDENED_POOL_SCALE,
+        initials_weight=API_HARDENED_INITIALS_WEIGHT,
         show_meta=False,
     )
+    _require_count_limit(request.count, field="count", max_count=max_count)
+    return request
 
 
 __all__ = [
