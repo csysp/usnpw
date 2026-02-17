@@ -63,6 +63,7 @@ class UsernameRequest:
     stream_state: str = ""
     stream_state_persist: bool = True
     allow_plaintext_stream_state: bool = False
+    strict_windows_acl: bool = False
     disallow_prefix: Tuple[str, ...] = ()
     disallow_substring: Tuple[str, ...] = ()
     no_leading_digit: bool = USERNAME_DEFAULT_NO_LEADING_DIGIT

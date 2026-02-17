@@ -250,6 +250,7 @@ def generate_usernames(request: UsernameRequest) -> UsernameResult:
                         stream_root_secret, stream_counter = username_stream_state.load_or_init_stream_state(
                             stream_state_path,
                             allow_plaintext=request.allow_plaintext_stream_state,
+                            strict_windows_acl=request.strict_windows_acl,
                         )
                     except OSError as exc:
                         raise ValueError(f"Unable to initialize stream state '{stream_state_path}': {exc}") from exc
@@ -301,6 +302,7 @@ def generate_usernames(request: UsernameRequest) -> UsernameResult:
                                 stream_root_secret,
                                 stream_counter,
                                 allow_plaintext=request.allow_plaintext_stream_state,
+                                strict_windows_acl=request.strict_windows_acl,
                             )
                         except OSError as exc:
                             raise ValueError(f"Unable to save stream state '{stream_state_path}': {exc}") from exc
@@ -368,7 +370,11 @@ def generate_usernames(request: UsernameRequest) -> UsernameResult:
 
             should_persist_usernames = not request.no_save and usernames_to_save
             if should_persist_usernames:
-                username_storage.append_lines(bl_path, usernames_to_save)
+                username_storage.append_lines(
+                    bl_path,
+                    usernames_to_save,
+                    strict_windows_acl=request.strict_windows_acl,
+                )
 
             should_persist_tokens = (
                 block_tokens
@@ -377,7 +383,11 @@ def generate_usernames(request: UsernameRequest) -> UsernameResult:
                 and (request.uniqueness_mode == "blacklist" or request.stream_save_tokens)
             )
             if should_persist_tokens:
-                username_storage.append_lines(token_path, sorted(tokens_to_save))
+                username_storage.append_lines(
+                    token_path,
+                    sorted(tokens_to_save),
+                    strict_windows_acl=request.strict_windows_acl,
+                )
 
             return UsernameResult(
                 records=tuple(records),

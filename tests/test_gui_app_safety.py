@@ -68,6 +68,13 @@ class _Widget:
         self.config.update(kwargs)
 
 
+def _bind_path_safety_methods(dummy: object) -> None:
+    dummy._canonicalize_for_risk = USnPwApp._canonicalize_for_risk.__get__(dummy, object)
+    dummy._normalized_path_value = USnPwApp._normalized_path_value
+    dummy._is_noncanonical_path = USnPwApp._is_noncanonical_path.__get__(dummy, object)
+    dummy._ensure_safe_path = USnPwApp._ensure_safe_path.__get__(dummy, object)
+
+
 class GuiAppSafetyTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -171,7 +178,8 @@ class GuiAppSafetyTests(unittest.TestCase):
         dummy.session_only_mode = _Var(False)
         dummy.unsafe_path_block = _Var(False)
         dummy._is_risky_path = lambda _path: False
-        dummy._ensure_safe_path = USnPwApp._ensure_safe_path.__get__(dummy, object)
+        _bind_path_safety_methods(dummy)
+        base = Path(tempfile.gettempdir())
 
         fields = {
             "profile": "reddit",
@@ -187,9 +195,9 @@ class GuiAppSafetyTests(unittest.TestCase):
             "initials_weight": 0.8,
             "show_meta": True,
             "allow_plaintext_stream_state": True,
-            "blacklist": ".tmp_blacklist.txt",
-            "token_blacklist": ".tmp_tokens.txt",
-            "stream_state": ".tmp_state.json",
+            "blacklist": str(base / "tmp_blacklist.txt"),
+            "token_blacklist": str(base / "tmp_tokens.txt"),
+            "stream_state": str(base / "tmp_state.json"),
         }
 
         updated = USnPwApp._apply_runtime_username_safety_fields(dummy, fields)
@@ -213,14 +221,15 @@ class GuiAppSafetyTests(unittest.TestCase):
         dummy.session_only_mode = _Var(True)
         dummy.unsafe_path_block = _Var(False)
         dummy._is_risky_path = lambda _path: False
-        dummy._ensure_safe_path = USnPwApp._ensure_safe_path.__get__(dummy, object)
+        _bind_path_safety_methods(dummy)
+        base = Path(tempfile.gettempdir())
 
         fields = {
             "profile": "reddit",
             "uniqueness_mode": "stream",
-            "blacklist": ".tmp_blacklist.txt",
-            "token_blacklist": ".tmp_tokens.txt",
-            "stream_state": ".tmp_state.json",
+            "blacklist": str(base / "tmp_blacklist.txt"),
+            "token_blacklist": str(base / "tmp_tokens.txt"),
+            "stream_state": str(base / "tmp_state.json"),
         }
         updated = USnPwApp._apply_runtime_username_safety_fields(dummy, fields)
 
@@ -228,11 +237,30 @@ class GuiAppSafetyTests(unittest.TestCase):
         self.assertFalse(updated["stream_save_tokens"])
         self.assertFalse(updated["stream_state_persist"])
 
+    def test_apply_runtime_username_safety_fields_blocks_noncanonical_targets(self) -> None:
+        dummy = type("Dummy", (), {})()
+        dummy.strict_opsec_lock = _Var(False)
+        dummy.session_only_mode = _Var(False)
+        dummy.unsafe_path_block = _Var(False)
+        dummy._is_risky_path = lambda _path: False
+        _bind_path_safety_methods(dummy)
+
+        fields = {
+            "profile": "reddit",
+            "uniqueness_mode": "blacklist",
+            "blacklist": "relative_blacklist.txt",
+            "token_blacklist": str(Path(tempfile.gettempdir()) / "tmp_tokens.txt"),
+        }
+
+        with self.assertRaisesRegex(ValueError, "non-canonical path blocked for username blacklist"):
+            USnPwApp._apply_runtime_username_safety_fields(dummy, fields)
+
     def test_confirm_and_delete_file_blocks_risky_delete_targets(self) -> None:
         dummy = type("Dummy", (), {})()
         dummy.unsafe_path_block = _Var(True)
         dummy._is_risky_path = lambda _path: True
         dummy._status_var = _Status()
+        _bind_path_safety_methods(dummy)
 
         handle = tempfile.NamedTemporaryFile(delete=False)
         try:
@@ -243,7 +271,31 @@ class GuiAppSafetyTests(unittest.TestCase):
 
             self.assertFalse(deleted)
             self.assertTrue(target.exists())
-            self.assertIn("unsafe delete path blocked", dummy._status_var.value)
+            self.assertIn("unsafe path blocked for token blacklist", dummy._status_var.value)
+            ask_yesno.assert_not_called()
+        finally:
+            try:
+                Path(handle.name).unlink()
+            except OSError:
+                pass
+
+    def test_confirm_and_delete_file_blocks_unusual_targets_without_prompt(self) -> None:
+        dummy = type("Dummy", (), {})()
+        dummy.unsafe_path_block = _Var(False)
+        dummy._is_risky_path = lambda _path: False
+        dummy._status_var = _Status()
+        _bind_path_safety_methods(dummy)
+
+        handle = tempfile.NamedTemporaryFile(delete=False, suffix=".dat")
+        try:
+            handle.close()
+            target = Path(handle.name)
+            with patch("usnpw.gui.app.messagebox.askyesno") as ask_yesno:
+                deleted = USnPwApp._confirm_and_delete_file(dummy, target, "token blacklist")
+
+            self.assertFalse(deleted)
+            self.assertTrue(target.exists())
+            self.assertIn("unusual path blocked for token blacklist", dummy._status_var.value)
             ask_yesno.assert_not_called()
         finally:
             try:
@@ -287,24 +339,30 @@ class GuiAppSafetyTests(unittest.TestCase):
         dummy.unsafe_path_block = _Var(False)
         dummy._is_risky_path = lambda _path: False
         dummy._confirm_sensitive_action = lambda _action: True
+        dummy.windows_acl_hardening = _Var(False)
+        _bind_path_safety_methods(dummy)
+        dummy._validate_export_path = USnPwApp._validate_export_path.__get__(dummy, object)
 
         exported: dict[str, object] = {}
+        out_path = Path(tempfile.gettempdir()) / "out.txt"
 
-        def _atomic_write(path: Path, text: str) -> None:
+        def _atomic_write(path: Path, text: str, *, strict_windows_acl: bool = False) -> None:
             exported["path"] = path
             exported["text"] = text
+            exported["strict_windows_acl"] = strict_windows_acl
 
         dummy._atomic_write_text = _atomic_write
 
         with (
             patch("usnpw.gui.app.messagebox.askyesno", return_value=True),
-            patch("usnpw.gui.app.filedialog.asksaveasfilename", return_value="out.txt"),
+            patch("usnpw.gui.app.filedialog.asksaveasfilename", return_value=str(out_path)),
         ):
             USnPwApp._export_text(dummy, widget, "username data")
 
-        self.assertEqual(exported["path"], Path("out.txt"))
+        self.assertEqual(exported["path"], out_path)
         self.assertEqual(exported["text"], "  alpha\nbeta  \n")
-        self.assertEqual(dummy._status_var.value, "Exported output to out.txt")
+        self.assertFalse(exported["strict_windows_acl"])
+        self.assertEqual(dummy._status_var.value, "Exported output.")
 
 
 if __name__ == "__main__":

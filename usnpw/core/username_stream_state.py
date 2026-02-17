@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Dict, Optional, Tuple
 
 from usnpw.core.dpapi import dpapi_protect, dpapi_unprotect
+from usnpw.core.file_hardening import enforce_private_file_permissions
 from usnpw.core.username_storage import fsync_parent_directory
 
 _STREAM_STATE_VERSION = 2
@@ -136,11 +137,22 @@ def _encode_base36_uint(n: int) -> str:
     return "".join(reversed(out))
 
 
-def load_or_init_stream_state(path: Path, allow_plaintext: bool = False) -> Tuple[bytes, int]:
+def load_or_init_stream_state(
+    path: Path,
+    allow_plaintext: bool = False,
+    *,
+    strict_windows_acl: bool = False,
+) -> Tuple[bytes, int]:
     if not path.exists():
         secret = os.urandom(32)
         counter = 0
-        save_stream_state(path, secret, counter, allow_plaintext=allow_plaintext)
+        save_stream_state(
+            path,
+            secret,
+            counter,
+            allow_plaintext=allow_plaintext,
+            strict_windows_acl=strict_windows_acl,
+        )
         return secret, counter
 
     try:
@@ -225,7 +237,14 @@ def load_or_init_stream_state(path: Path, allow_plaintext: bool = False) -> Tupl
     return secret, counter
 
 
-def save_stream_state(path: Path, secret: bytes, counter: int, allow_plaintext: bool = False) -> None:
+def save_stream_state(
+    path: Path,
+    secret: bytes,
+    counter: int,
+    allow_plaintext: bool = False,
+    *,
+    strict_windows_acl: bool = False,
+) -> None:
     if counter < 0:
         raise ValueError("counter must be non-negative")
     if len(secret) < 16:
@@ -261,10 +280,7 @@ def save_stream_state(path: Path, secret: bytes, counter: int, allow_plaintext: 
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(tmp, path)
-        try:
-            os.chmod(path, 0o600)
-        except OSError:
-            pass
+        enforce_private_file_permissions(path, strict_windows_acl=strict_windows_acl)
         fsync_parent_directory(path)
     except OSError as e:
         raise ValueError(f"Unable to write stream state file '{path}': {e}") from e

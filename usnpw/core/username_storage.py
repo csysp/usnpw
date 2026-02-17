@@ -6,6 +6,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterable, Iterator, Set, TextIO
 
+from usnpw.core.file_hardening import enforce_private_file_permissions
+
 MAX_LINESET_FILE_BYTES = 64 * 1024 * 1024
 
 
@@ -46,41 +48,35 @@ def fsync_parent_directory(path: Path) -> None:
 
 
 @contextmanager
-def _open_append_private(path: Path) -> Iterator[TextIO]:
+def _open_append_private(path: Path, *, strict_windows_acl: bool = False) -> Iterator[TextIO]:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(str(path), os.O_APPEND | os.O_CREAT | os.O_WRONLY, 0o600)
-    if os.name != "nt":
-        # Create with restrictive permissions on POSIX; prevents leaking persisted usernames/tokens.
+    try:
+        # Threat model: persisted username/token files should remain private-by-default,
+        # with optional strict ACL hardening on Windows.
+        enforce_private_file_permissions(path, strict_windows_acl=strict_windows_acl)
+    except ValueError as exc:
         try:
-            os.fchmod(fd, 0o600)
-        except OSError as exc:
-            try:
-                os.close(fd)
-            except OSError:
-                pass
-            raise ValueError(f"Unable to enforce private permissions on '{path}': {exc}") from exc
-    else:
-        # Best-effort private mode normalization on Windows; ACL behavior is OS-managed.
-        try:
-            os.chmod(path, 0o600)
+            os.close(fd)
         except OSError:
             pass
+        raise ValueError(str(exc)) from exc
     with os.fdopen(fd, "a", encoding="utf-8", newline="\n") as handle:
         yield handle
 
 
-def append_line(path: Path, line: str) -> None:
-    append_lines(path, (line,))
+def append_line(path: Path, line: str, *, strict_windows_acl: bool = False) -> None:
+    append_lines(path, (line,), strict_windows_acl=strict_windows_acl)
 
 
-def append_lines(path: Path, lines: Iterable[str]) -> None:
+def append_lines(path: Path, lines: Iterable[str], *, strict_windows_acl: bool = False) -> None:
     iterator = iter(lines)
     try:
         first = next(iterator)
     except StopIteration:
         return
 
-    with _open_append_private(path) as handle:
+    with _open_append_private(path, strict_windows_acl=strict_windows_acl) as handle:
         handle.write(first + "\n")
         for line in iterator:
             handle.write(line + "\n")

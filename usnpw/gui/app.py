@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import queue
+import re
 import sys
 import tempfile
 import threading
@@ -13,6 +14,7 @@ from tkinter.scrolledtext import ScrolledText
 from typing import Callable, Iterable
 
 from usnpw.core.export_crypto import encrypt_text
+from usnpw.core.file_hardening import enforce_private_file_permissions
 from usnpw.core.error_dialect import make_error
 from usnpw.core.models import (
     USERNAME_DEFAULT_HISTORY,
@@ -36,6 +38,7 @@ from usnpw.gui.adapters import (
     effective_stream_state_path,
     format_error_status,
     is_unusual_delete_target,
+    is_unusual_export_target,
     parse_int,
     stream_state_lock_path,
 )
@@ -193,9 +196,32 @@ class USnPwApp(tk.Tk):
         for line in display_lines:
             widget.insert(tk.END, line + "\n")
 
+    def _sanitize_status_text(self, text: str) -> str:
+        value = text.strip()
+        if not value:
+            return value
+        home = str(Path.home())
+        if home:
+            value = value.replace(home, "<home>")
+        value = re.sub(r"[A-Za-z]:[\\/][^\s\"']+", "<path>", value)
+        value = re.sub(r"(?<!:)/(?:[^/\s\"']+/)*[^/\s\"']+", "<path>", value)
+        return value
+
     @staticmethod
     def _normalized_path_value(path: Path) -> str:
         return os.path.normcase(os.path.normpath(str(path)))
+
+    def _is_noncanonical_path(self, path: Path) -> bool:
+        raw_input = str(path).strip()
+        if not raw_input:
+            return True
+        expanded = path.expanduser()
+        if not expanded.is_absolute():
+            return True
+        if any(part in (".", "..") for part in expanded.parts):
+            return True
+        canonical = self._canonicalize_for_risk(expanded)
+        return self._normalized_path_value(expanded) != self._normalized_path_value(canonical)
 
     def _canonicalize_for_risk(self, path: Path) -> Path:
         expanded = path.expanduser()
@@ -223,11 +249,15 @@ class USnPwApp(tk.Tk):
         home_parent_value = self._normalized_path_value(home.parent)
         return canonical_value in (home_value, home_parent_value)
 
-    def _ensure_safe_path(self, path: Path, label: str) -> None:
-        if not self.unsafe_path_block.get():
-            return
-        if self._is_risky_path(path):
-            raise ValueError(f"unsafe path blocked for {label}: {path}")
+    def _ensure_safe_path(self, path: Path, label: str, *, allow_unusual: bool = False) -> Path:
+        if self._is_noncanonical_path(path):
+            raise ValueError(f"non-canonical path blocked for {label}")
+        canonical = self._canonicalize_for_risk(path)
+        if self.unsafe_path_block.get() and self._is_risky_path(canonical):
+            raise ValueError(f"unsafe path blocked for {label}")
+        if not allow_unusual and is_unusual_delete_target(canonical, label):
+            raise ValueError(f"unusual path blocked for {label}")
+        return canonical
 
     def _apply_runtime_username_safety_fields(self, fields: dict[str, object]) -> dict[str, object]:
         strict_locked = self.strict_opsec_lock.get()
@@ -258,12 +288,15 @@ class USnPwApp(tk.Tk):
         profile = str(fields.get("profile", "generic"))
         blacklist = Path(str(fields.get("blacklist", "")).strip()).expanduser()
         token_blacklist = Path(str(fields.get("token_blacklist", "")).strip()).expanduser()
-        self._ensure_safe_path(blacklist, "username blacklist")
-        self._ensure_safe_path(token_blacklist, "token blacklist")
+        blacklist = self._ensure_safe_path(blacklist, "username blacklist")
+        token_blacklist = self._ensure_safe_path(token_blacklist, "token blacklist")
+        fields["blacklist"] = str(blacklist)
+        fields["token_blacklist"] = str(token_blacklist)
 
         if fields.get("uniqueness_mode") == "stream":
             stream_state_path = effective_stream_state_path(profile, str(fields.get("stream_state", "")))
-            self._ensure_safe_path(stream_state_path, "stream state")
+            stream_state_path = self._ensure_safe_path(stream_state_path, "stream state")
+            fields["stream_state"] = str(stream_state_path)
 
         return fields
 
@@ -296,18 +329,20 @@ class USnPwApp(tk.Tk):
         self._render_output(widget, reveal=True)
         self._status_var.set("Output auto-cleared.")
 
-    def _delete_file_if_exists(self, path: Path, label: str) -> bool:
-        if not path.exists() or path.is_dir():
-            return False
-        if self.unsafe_path_block.get() and self._is_risky_path(path):
-            self._status_var.set(format_error_status(f"panic clear blocked unsafe {label} path: {path}"))
-            return False
+    def _delete_file_if_exists(self, path: Path, label: str) -> tuple[bool, bool]:
+        if not path.exists():
+            return False, False
+        if path.is_dir():
+            return False, True
         try:
-            path.unlink()
-            return True
-        except OSError as exc:
-            self._status_var.set(format_error_status(f"panic clear failed for {label}: {exc}"))
-            return False
+            safe_path = self._ensure_safe_path(path, label)
+        except ValueError:
+            return False, True
+        try:
+            safe_path.unlink()
+            return True, False
+        except OSError:
+            return False, True
 
     def _panic_clear(self) -> None:
         proceed = messagebox.askyesno(
@@ -332,21 +367,38 @@ class USnPwApp(tk.Tk):
         self._clear_clipboard_now()
 
         removed: list[str] = []
+        blocked: list[str] = []
         token_path = Path(self.u_token_blacklist.get().strip()).expanduser()
-        if self._delete_file_if_exists(token_path, "token blacklist"):
+        token_removed, token_blocked = self._delete_file_if_exists(token_path, "token blacklist")
+        if token_removed:
             removed.append("token blacklist")
+        elif token_blocked:
+            blocked.append("token blacklist")
 
         stream_state_path = effective_stream_state_path(self.u_profile.get(), self.u_stream_state.get())
-        if self._delete_file_if_exists(stream_state_path, "stream state"):
+        state_removed, state_blocked = self._delete_file_if_exists(stream_state_path, "stream state")
+        if state_removed:
             removed.append("stream state")
+        elif state_blocked:
+            blocked.append("stream state")
         stream_lock_path = stream_state_lock_path(stream_state_path)
-        if self._delete_file_if_exists(stream_lock_path, "stream state lock"):
+        lock_removed, lock_blocked = self._delete_file_if_exists(stream_lock_path, "stream state lock")
+        if lock_removed:
             removed.append("stream state lock")
+        elif lock_blocked:
+            blocked.append("stream state lock")
 
+        self.export_passphrase.set("")
+
+        details: list[str] = []
         if removed:
-            self._status_var.set(f"Panic clear completed ({', '.join(removed)} removed).")
-        else:
-            self._status_var.set("Panic clear completed.")
+            details.append(f"removed: {', '.join(removed)}")
+        if blocked:
+            details.append(f"blocked: {', '.join(blocked)}")
+        if details:
+            self._status_var.set(f"Panic clear completed ({'; '.join(details)}).")
+            return
+        self._status_var.set("Panic clear completed.")
 
     def _apply_theme(self, dark: bool) -> None:
         self._style.theme_use("clam")
@@ -447,6 +499,7 @@ class USnPwApp(tk.Tk):
         self.output_ttl_seconds = tk.StringVar(value="30")
         self.encrypt_exports = tk.BooleanVar(value=False)
         self.export_passphrase = tk.StringVar(value="")
+        self.windows_acl_hardening = tk.BooleanVar(value=False)
 
         ttk.Checkbutton(
             row1, text="Strict OPSEC lock", variable=self.strict_opsec_lock, command=self._on_strict_opsec_toggled
@@ -489,6 +542,12 @@ class USnPwApp(tk.Tk):
 
         self.chk_encrypt_exports = ttk.Checkbutton(row3, text="Encrypt exports", variable=self.encrypt_exports)
         self.chk_encrypt_exports.pack(side=tk.LEFT)
+        self.chk_windows_acl = ttk.Checkbutton(
+            row3,
+            text="Strict Windows ACL hardening",
+            variable=self.windows_acl_hardening,
+        )
+        self.chk_windows_acl.pack(side=tk.LEFT, padx=(10, 0))
         ttk.Label(row3, text="passphrase").pack(side=tk.LEFT, padx=(10, 4))
         self.entry_export_passphrase = ttk.Entry(row3, textvariable=self.export_passphrase, show="*", width=20)
         self.entry_export_passphrase.pack(side=tk.LEFT)
@@ -499,6 +558,8 @@ class USnPwApp(tk.Tk):
             self.encrypt_exports.set(False)
             self.chk_encrypt_exports.configure(state=tk.DISABLED)
             self.entry_export_passphrase.configure(state=tk.DISABLED)
+            self.windows_acl_hardening.set(False)
+            self.chk_windows_acl.configure(state=tk.DISABLED)
             self._windows_only_label = ttk.Label(row3, text="(Windows only)")
             self._windows_only_label.pack(side=tk.LEFT, padx=(8, 0))
 
@@ -714,32 +775,21 @@ class USnPwApp(tk.Tk):
 
     def _confirm_and_delete_file(self, path: Path, label: str) -> bool:
         if not path.exists():
-            self._status_var.set(f"{label} not found: {path}")
+            self._status_var.set(f"{label} not found.")
             return False
         if path.is_dir():
-            self._status_var.set(format_error_status(f"refusing to delete directory for {label}: {path}"))
-            return False
-        if self.unsafe_path_block.get() and self._is_risky_path(path):
-            self._status_var.set(format_error_status(f"unsafe delete path blocked for {label}: {path}"))
+            self._status_var.set(format_error_status(f"refusing to delete directory for {label}"))
             return False
 
-        if is_unusual_delete_target(path, label):
-            unusual_confirm = messagebox.askyesno(
-                title="Unusual Target Warning",
-                message=(
-                    f"Path looks unusual for {label}:\n{path}\n\n"
-                    "Proceed anyway?"
-                ),
-                icon=messagebox.WARNING,
-                default=messagebox.NO,
-            )
-            if not unusual_confirm:
-                self._status_var.set(f"Canceled deletion of {label}.")
-                return False
+        try:
+            safe_path = self._ensure_safe_path(path, label)
+        except ValueError as exc:
+            self._status_var.set(format_error_status(str(exc)))
+            return False
 
         confirm = messagebox.askyesno(
             title=f"Delete {label}",
-            message=f"Delete {label} at:\n{path}\n\nThis action cannot be undone.",
+            message=f"Delete {label} file '{safe_path.name}'?\n\nThis action cannot be undone.",
             icon=messagebox.WARNING,
             default=messagebox.NO,
         )
@@ -747,11 +797,11 @@ class USnPwApp(tk.Tk):
             self._status_var.set(f"Canceled deletion of {label}.")
             return False
         try:
-            path.unlink()
-        except OSError as exc:
-            self._status_var.set(format_error_status(f"failed to delete {label}: {exc}"))
+            safe_path.unlink()
+        except OSError:
+            self._status_var.set(format_error_status(f"failed to delete {label}"))
             return False
-        self._status_var.set(f"Deleted {label}: {path}")
+        self._status_var.set(f"Deleted {label}.")
         return True
 
     def _clear_token_blacklist(self) -> None:
@@ -856,7 +906,7 @@ class USnPwApp(tk.Tk):
                     self._status_var.set("Done.")
                 else:
                     msg, tb = payload if isinstance(payload, tuple) else (str(payload), "")
-                    self._status_var.set(format_error_status(msg))
+                    self._status_var.set(self._sanitize_status_text(format_error_status(msg)))
                     if tb:
                         if os.environ.get("USNPW_GUI_VERBOSE_ERRORS", "").strip().lower() in ("1", "true", "yes", "on"):
                             print(tb, file=sys.stderr)
@@ -921,7 +971,7 @@ class USnPwApp(tk.Tk):
         else:
             self._status_var.set("Copied output to clipboard.")
 
-    def _atomic_write_text(self, path: Path, text: str) -> None:
+    def _atomic_write_text(self, path: Path, text: str, *, strict_windows_acl: bool = False) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp_name = tempfile.mkstemp(prefix=".tmp_usnpw_export_", dir=str(path.parent))
         try:
@@ -930,10 +980,7 @@ class USnPwApp(tk.Tk):
                 handle.flush()
                 os.fsync(handle.fileno())
             os.replace(tmp_name, path)
-            try:
-                os.chmod(path, 0o600)
-            except OSError:
-                pass
+            enforce_private_file_permissions(path, strict_windows_acl=strict_windows_acl)
             try:
                 dir_fd = os.open(str(path.parent), os.O_RDONLY)
             except OSError:
@@ -955,6 +1002,13 @@ class USnPwApp(tk.Tk):
                 except OSError:
                     pass
 
+    def _validate_export_path(self, path: Path, *, encrypted: bool) -> Path:
+        safe_path = self._ensure_safe_path(path, "export path", allow_unusual=True)
+        if is_unusual_export_target(safe_path, encrypted=encrypted):
+            expected = ".enc" if encrypted else ".txt"
+            raise ValueError(f"unusual path blocked for export (expected {expected})")
+        return safe_path
+
     def _export_text(self, widget: ScrolledText, label: str) -> None:
         if not self._confirm_sensitive_action("Exporting output"):
             self._status_var.set("Export canceled by copy guard.")
@@ -968,50 +1022,61 @@ class USnPwApp(tk.Tk):
 
         encrypted = self.encrypt_exports.get()
         export_payload = text + "\n"
-        if encrypted:
-            passphrase = self.export_passphrase.get()
-            if not passphrase:
-                self._status_var.set(format_error_status("export passphrase is required when encryption is enabled"))
+        passphrase = ""
+        try:
+            if encrypted:
+                passphrase = self.export_passphrase.get()
+                if not passphrase:
+                    self._status_var.set(format_error_status("export passphrase is required when encryption is enabled"))
+                    return
+                try:
+                    export_payload = encrypt_text(export_payload, passphrase)
+                except ValueError as exc:
+                    self._status_var.set(format_error_status(str(exc)))
+                    return
+
+            proceed = messagebox.askyesno(
+                title="Sensitive Data Warning",
+                message=build_export_warning(label, encrypted),
+                icon=messagebox.WARNING,
+                default=messagebox.NO,
+            )
+            if not proceed:
+                self._status_var.set("Export canceled.")
                 return
+
+            path = filedialog.asksaveasfilename(
+                title="Export Output",
+                defaultextension=".enc" if encrypted else ".txt",
+            )
+            if not path:
+                self._status_var.set("Export canceled.")
+                return
+
+            export_path = Path(path)
             try:
-                export_payload = encrypt_text(export_payload, passphrase)
+                export_path = self._validate_export_path(export_path, encrypted=encrypted)
             except ValueError as exc:
                 self._status_var.set(format_error_status(str(exc)))
                 return
 
-        proceed = messagebox.askyesno(
-            title="Sensitive Data Warning",
-            message=build_export_warning(label, encrypted),
-            icon=messagebox.WARNING,
-            default=messagebox.NO,
-        )
-        if not proceed:
-            self._status_var.set("Export canceled.")
-            return
+            try:
+                self._atomic_write_text(
+                    export_path,
+                    export_payload,
+                    strict_windows_acl=self.windows_acl_hardening.get(),
+                )
+            except (OSError, ValueError):
+                self._status_var.set(format_error_status("export failed due to filesystem error"))
+                return
 
-        path = filedialog.asksaveasfilename(
-            title="Export Output",
-            defaultextension=".enc" if encrypted else ".txt",
-        )
-        if not path:
-            self._status_var.set("Export canceled.")
-            return
-
-        export_path = Path(path)
-        if self.unsafe_path_block.get() and self._is_risky_path(export_path):
-            self._status_var.set(format_error_status(f"unsafe export path blocked: {export_path}"))
-            return
-
-        try:
-            self._atomic_write_text(export_path, export_payload)
-        except OSError as exc:
-            self._status_var.set(format_error_status(f"export failed: {exc}"))
-            return
-
-        if encrypted:
-            self._status_var.set(f"Exported encrypted output to {path}")
-        else:
-            self._status_var.set(f"Exported output to {path}")
+            if encrypted:
+                self._status_var.set("Exported encrypted output.")
+            else:
+                self._status_var.set("Exported output.")
+        finally:
+            if encrypted and passphrase:
+                self.export_passphrase.set("")
 
     def _generate_passwords(self) -> None:
         def task() -> tuple[str, ...]:
@@ -1057,6 +1122,7 @@ class USnPwApp(tk.Tk):
                 "stream_save_tokens": self.u_stream_save_tokens.get(),
                 "stream_state": self.u_stream_state.get(),
                 "allow_plaintext_stream_state": self.u_allow_plaintext.get(),
+                "strict_windows_acl": self.windows_acl_hardening.get(),
                 "disallow_prefix": self.u_disallow_prefix.get(),
                 "disallow_substring": self.u_disallow_substring.get(),
                 "no_leading_digit": self.u_no_leading_digit.get(),

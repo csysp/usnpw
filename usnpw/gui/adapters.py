@@ -83,6 +83,8 @@ def stream_state_lock_path(state_path: Path) -> Path:
 def is_unusual_delete_target(path: Path, label: str) -> bool:
     name = path.name.lower()
     suffix = path.suffix.lower()
+    if label == "username blacklist":
+        return suffix != ".txt"
     if label == "token blacklist":
         return suffix != ".txt"
     if label == "stream state":
@@ -90,6 +92,11 @@ def is_unusual_delete_target(path: Path, label: str) -> bool:
     if label == "stream state lock":
         return suffix != ".lock" or not name.endswith(".json.lock")
     return True
+
+
+def is_unusual_export_target(path: Path, *, encrypted: bool) -> bool:
+    expected = ".enc" if encrypted else ".txt"
+    return path.suffix.lower() != expected
 
 
 def build_password_request(fields: Mapping[str, object]) -> PasswordRequest:
@@ -130,6 +137,7 @@ def build_username_request(fields: Mapping[str, object]) -> UsernameRequest:
         stream_state=str(fields.get("stream_state", "")).strip(),
         stream_state_persist=bool(fields.get("stream_state_persist", True)),
         allow_plaintext_stream_state=bool(fields.get("allow_plaintext_stream_state", False)),
+        strict_windows_acl=bool(fields.get("strict_windows_acl", False)),
         disallow_prefix=split_csv(str(fields.get("disallow_prefix", ""))),
         disallow_substring=split_csv(str(fields.get("disallow_substring", ""))),
         no_leading_digit=bool(fields.get("no_leading_digit", USERNAME_DEFAULT_NO_LEADING_DIGIT)),

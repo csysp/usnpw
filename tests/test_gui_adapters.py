@@ -12,6 +12,7 @@ from usnpw.gui.adapters import (
     effective_stream_state_path,
     format_error_status,
     is_unusual_delete_target,
+    is_unusual_export_target,
     stream_state_lock_path,
 )
 
@@ -62,6 +63,7 @@ class GuiAdapterTests(unittest.TestCase):
                 "stream_state": "state.json",
                 "stream_state_persist": False,
                 "allow_plaintext_stream_state": False,
+                "strict_windows_acl": True,
                 "disallow_prefix": "admin,mod",
                 "disallow_substring": "test,bot",
                 "no_leading_digit": True,
@@ -79,6 +81,7 @@ class GuiAdapterTests(unittest.TestCase):
         self.assertEqual(req.disallow_substring, ("test", "bot"))
         self.assertTrue(req.no_leading_digit)
         self.assertFalse(req.stream_state_persist)
+        self.assertTrue(req.strict_windows_acl)
 
     def test_build_username_request_uses_hardened_defaults(self) -> None:
         req = build_username_request({})
@@ -118,12 +121,20 @@ class GuiAdapterTests(unittest.TestCase):
         self.assertEqual(lock.name, "state.json.lock")
 
     def test_delete_target_heuristics(self) -> None:
+        self.assertFalse(is_unusual_delete_target(Path("usernames.txt"), "username blacklist"))
+        self.assertTrue(is_unusual_delete_target(Path("usernames.dat"), "username blacklist"))
         self.assertFalse(is_unusual_delete_target(Path("tokens.txt"), "token blacklist"))
         self.assertTrue(is_unusual_delete_target(Path("tokens.dat"), "token blacklist"))
         self.assertFalse(is_unusual_delete_target(Path("state.json"), "stream state"))
         self.assertTrue(is_unusual_delete_target(Path("state.txt"), "stream state"))
         self.assertFalse(is_unusual_delete_target(Path("state.json.lock"), "stream state lock"))
         self.assertTrue(is_unusual_delete_target(Path("state.lock"), "stream state lock"))
+
+    def test_export_target_heuristics(self) -> None:
+        self.assertFalse(is_unusual_export_target(Path("out.txt"), encrypted=False))
+        self.assertTrue(is_unusual_export_target(Path("out.log"), encrypted=False))
+        self.assertFalse(is_unusual_export_target(Path("out.enc"), encrypted=True))
+        self.assertTrue(is_unusual_export_target(Path("out.txt"), encrypted=True))
 
 
 if __name__ == "__main__":
