@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import sys
+
 from _bootstrap import bootstrap_repo_path
 
 
@@ -10,4 +12,4 @@ from usnpw.gui.app import main
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))

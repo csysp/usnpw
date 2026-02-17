@@ -1049,11 +1049,12 @@ class USnPwApp(tk.Tk):
         self._start_job(task, lambda lines: self._write_lines(self.username_output, lines))
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    del argv
     app = USnPwApp()
     app.mainloop()
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))
