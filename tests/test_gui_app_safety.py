@@ -16,19 +16,28 @@ from usnpw.core.models import (
     USERNAME_DEFAULT_UNIQUENESS_MODE,
 )
 
-_GUI_TEST_SKIP_REASON = ""
+tk = None
+USnPwApp = None
 
-try:
-    import tkinter as tk
-    from usnpw.gui.app import USnPwApp
-except ImportError as exc:
+def _is_tkinter_dependency_error(exc: ImportError) -> bool:
+    name = getattr(exc, "name", "") or ""
     msg = str(exc).lower()
-    if "tkinter" in msg or "_tkinter" in msg:
-        tk = None  # type: ignore[assignment]
-        USnPwApp = None  # type: ignore[assignment]
-        _GUI_TEST_SKIP_REASON = f"Tkinter GUI dependencies unavailable: {exc}"
-    else:
+    if name in {"tkinter", "_tkinter"}:
+        return True
+    if name.startswith("tkinter."):
+        return True
+    return any(token in msg for token in ("tkinter", "_tkinter", "libtk", "libtcl"))
+
+
+def _load_gui_test_deps() -> tuple[object, object]:
+    try:
+        import tkinter as tk_mod
+        from usnpw.gui.app import USnPwApp as app_cls
+    except ImportError as exc:
+        if _is_tkinter_dependency_error(exc):
+            raise unittest.SkipTest(f"Tkinter GUI dependencies unavailable: {exc}") from exc
         raise
+    return tk_mod, app_cls
 
 
 class _Var:
@@ -58,8 +67,12 @@ class _Widget:
         self.config.update(kwargs)
 
 
-@unittest.skipIf(bool(_GUI_TEST_SKIP_REASON), _GUI_TEST_SKIP_REASON)
 class GuiAppSafetyTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        global tk, USnPwApp
+        tk, USnPwApp = _load_gui_test_deps()
+
     def test_copy_guard_requires_prompt_when_enabled(self) -> None:
         dummy = type("Dummy", (), {})()
         dummy.copy_guard = _Var(True)
