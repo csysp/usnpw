@@ -153,7 +153,22 @@ class APIServerTests(unittest.TestCase):
         self.assertEqual(self._error_code(payload), "invalid_request")
         self.assertEqual(self._error_message(payload), "Content-Type must be application/json")
 
-    def test_auth_throttle_blocks_repeated_failures(self) -> None:
+    def test_get_on_post_endpoint_returns_json_405(self) -> None:
+        status, payload = self._request("GET", "/v1/passwords")
+        self.assertEqual(status, 405)
+        self.assertEqual(self._error_code(payload), "method_not_allowed")
+
+    def test_unsupported_method_returns_json_405(self) -> None:
+        status, payload = self._request(
+            "PUT",
+            "/v1/passwords",
+            payload={"count": 1},
+            token="test-token",
+        )
+        self.assertEqual(status, 405)
+        self.assertEqual(self._error_code(payload), "method_not_allowed")
+
+    def test_auth_throttle_uses_composite_route_and_token_keying(self) -> None:
         config = APIConfig(
             host="127.0.0.1",
             port=0,
@@ -177,10 +192,10 @@ class APIServerTests(unittest.TestCase):
                 token="wrong-token",
                 port=port,
             )
-            status2, payload2 = self._request(
+            status2, _ = self._request(
                 "POST",
-                "/v1/passwords",
-                payload={"count": 1},
+                "/v1/usernames",
+                payload={"count": 1, "profile": "reddit"},
                 token="wrong-token",
                 port=port,
             )
@@ -188,14 +203,22 @@ class APIServerTests(unittest.TestCase):
                 "POST",
                 "/v1/passwords",
                 payload={"count": 1},
+                token="wrong-token",
+                port=port,
+            )
+            status4, payload4 = self._request(
+                "POST",
+                "/v1/passwords",
+                payload={"count": 1},
                 token="rate-token",
                 port=port,
             )
             self.assertEqual(status1, 401)
-            self.assertEqual(status2, 429)
-            self.assertEqual(self._error_code(payload2), "too_many_auth_failures")
+            self.assertEqual(status2, 401)
             self.assertEqual(status3, 429)
             self.assertEqual(self._error_code(payload3), "too_many_auth_failures")
+            self.assertEqual(status4, 200)
+            self.assertIn("outputs", payload4)
         finally:
             server.shutdown()
             server.server_close()
@@ -221,6 +244,7 @@ class APIServerTests(unittest.TestCase):
                 tls_cert_file="",
                 tls_key_file="",
                 allow_env_token=False,
+                allow_cli_token=False,
             )
             config = _build_config(args)
             self.assertEqual(config.token, "file-token")
@@ -245,6 +269,7 @@ class APIServerTests(unittest.TestCase):
                 tls_cert_file="",
                 tls_key_file="",
                 allow_env_token=False,
+                allow_cli_token=False,
             )
             with self.assertRaisesRegex(ValueError, "USNPW_API_TOKEN is disabled by default"):
                 _build_config(args)
@@ -267,9 +292,54 @@ class APIServerTests(unittest.TestCase):
                 tls_cert_file="",
                 tls_key_file="",
                 allow_env_token=True,
+                allow_cli_token=False,
             )
             config = _build_config(args)
             self.assertEqual(config.token, "env-token")
+
+    def test_build_config_rejects_cli_token_without_opt_in(self) -> None:
+        args = argparse.Namespace(
+            host="127.0.0.1",
+            port=8080,
+            token="cli-token",
+            token_file="",
+            max_body_bytes=1024,
+            max_password_count=10,
+            max_username_count=10,
+            max_concurrent_requests=32,
+            socket_timeout_seconds=5.0,
+            auth_fail_limit=5,
+            auth_fail_window_seconds=60,
+            auth_block_seconds=120,
+            tls_cert_file="",
+            tls_key_file="",
+            allow_env_token=False,
+            allow_cli_token=False,
+        )
+        with self.assertRaisesRegex(ValueError, "--token is disabled by default"):
+            _build_config(args)
+
+    def test_build_config_allows_cli_token_with_opt_in(self) -> None:
+        args = argparse.Namespace(
+            host="127.0.0.1",
+            port=8080,
+            token="cli-token",
+            token_file="",
+            max_body_bytes=1024,
+            max_password_count=10,
+            max_username_count=10,
+            max_concurrent_requests=32,
+            socket_timeout_seconds=5.0,
+            auth_fail_limit=5,
+            auth_fail_window_seconds=60,
+            auth_block_seconds=120,
+            tls_cert_file="",
+            tls_key_file="",
+            allow_env_token=False,
+            allow_cli_token=True,
+        )
+        config = _build_config(args)
+        self.assertEqual(config.token, "cli-token")
 
     def test_internal_error_returns_json_500(self) -> None:
         with patch("usnpw.api.server.generate_passwords", side_effect=RuntimeError("boom")):

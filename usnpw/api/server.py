@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Mapping
+from urllib.parse import urlsplit
 
 from usnpw.api.adapters import build_password_request, build_username_request
 from usnpw.core.error_dialect import error_payload, error_payload_from_exception, format_error_text
@@ -32,6 +33,11 @@ DEFAULT_AUTH_FAIL_LIMIT = 16
 DEFAULT_AUTH_FAIL_WINDOW_SECONDS = 60
 DEFAULT_AUTH_BLOCK_SECONDS = 300
 DEFAULT_REQUEST_QUEUE_SIZE = 256
+KNOWN_ENDPOINT_METHODS: dict[str, tuple[str, ...]] = {
+    "/healthz": ("GET",),
+    "/v1/passwords": ("POST",),
+    "/v1/usernames": ("POST",),
+}
 
 
 class PayloadTooLargeError(ValueError):
@@ -212,21 +218,33 @@ def _read_token_file(path: str) -> str:
 
 
 def _build_config(args: argparse.Namespace) -> APIConfig:
-    token = (args.token or "").strip()
+    cli_token = (args.token or "").strip()
+    allow_cli_token = bool(getattr(args, "allow_cli_token", False))
     token_file = (args.token_file or "").strip()
     env_token = (os.environ.get("USNPW_API_TOKEN", "") or "").strip()
-    if token and token_file:
-        raise ValueError("set either USNPW_API_TOKEN or USNPW_API_TOKEN_FILE, not both")
+    if cli_token and not allow_cli_token:
+        raise ValueError(
+            "--token is disabled by default for privacy. "
+            "Use --token-file, or set --allow-cli-token to opt in."
+        )
+    if cli_token and token_file:
+        raise ValueError("set either --token or --token-file, not both")
+    token = ""
     if token_file:
         token = _read_token_file(token_file)
-    elif not token and env_token:
+    elif cli_token:
+        token = cli_token
+    elif env_token:
         if not args.allow_env_token:
             raise ValueError(
                 "USNPW_API_TOKEN is disabled by default; use USNPW_API_TOKEN_FILE or set USNPW_API_ALLOW_ENV_TOKEN=true"
             )
         token = env_token
     if not token:
-        raise ValueError("USNPW_API_TOKEN_FILE is required (or pass --token / --allow-env-token)")
+        raise ValueError(
+            "USNPW_API_TOKEN_FILE is required "
+            "(or use USNPW_API_TOKEN with --allow-env-token, or opt in to --token with --allow-cli-token)"
+        )
 
     if args.port <= 0:
         raise ValueError("port must be > 0")
@@ -294,16 +312,27 @@ def _handler_factory(config: APIConfig) -> type[BaseHTTPRequestHandler]:
             if os.environ.get("USNPW_API_ACCESS_LOG", "").strip().lower() in ("1", "true", "yes", "on"):
                 sys.stderr.write(f"{self.address_string()} - - [{self.log_date_time_string()}] {fmt % args}\n")
 
-        def _write_json(self, code: int, payload: Mapping[str, Any], *, close: bool = False) -> None:
+        def _write_json(
+            self,
+            code: int,
+            payload: Mapping[str, Any],
+            *,
+            close: bool = False,
+            headers: Mapping[str, str] | None = None,
+        ) -> None:
             body = json.dumps(payload, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
             self.send_response(code)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
+            if headers:
+                for name, value in headers.items():
+                    self.send_header(name, value)
             if close:
                 self.send_header("Connection", "close")
                 self.close_connection = True
             self.end_headers()
-            self.wfile.write(body)
+            if self.command != "HEAD":
+                self.wfile.write(body)
 
         def _write_internal_error(self, exc: BaseException | None = None) -> None:
             try:
@@ -321,13 +350,45 @@ def _handler_factory(config: APIConfig) -> type[BaseHTTPRequestHandler]:
                 # Client may have disconnected before receiving the response.
                 return
 
-        def _require_auth(self) -> bool:
+        def _request_path(self) -> str:
+            return urlsplit(self.path).path
+
+        def _presented_bearer_token(self) -> str | None:
             auth_header = self.headers.get("Authorization", "")
-            prefix = "Bearer "
-            if not auth_header.startswith(prefix):
+            parts = auth_header.split(None, 1)
+            if len(parts) != 2:
+                return None
+            scheme, token = parts
+            if scheme.lower() != "bearer":
+                return None
+            presented = token.strip()
+            return presented or None
+
+        @staticmethod
+        def _route_throttle_key(path: str) -> str:
+            if path in ("/v1/passwords", "/v1/usernames"):
+                return path
+            if path == "/healthz":
+                return path
+            return "__other__"
+
+        def _auth_throttle_key(self, *, path: str, presented_token: str | None) -> str:
+            route = self._route_throttle_key(path)
+            if presented_token is None:
+                token_fp = "missing"
+            else:
+                token_fp = hmac.new(
+                    config.token.encode("utf-8"),
+                    presented_token.encode("utf-8"),
+                    digestmod="sha256",
+                ).hexdigest()[:24]
+            return f"{self._client_identity()}|{route}|{token_fp}"
+
+        @staticmethod
+        def _is_authorized(presented_token: str | None, *, expected_token: str) -> bool:
+            if presented_token is None:
                 return False
-            presented = auth_header[len(prefix) :].strip()
-            return hmac.compare_digest(presented, config.token)
+            return hmac.compare_digest(presented_token, expected_token)
 
         def _client_identity(self) -> str:
             try:
@@ -339,6 +400,30 @@ def _handler_factory(config: APIConfig) -> type[BaseHTTPRequestHandler]:
         def _is_json_content_type(content_type: str) -> bool:
             media_type = content_type.split(";", 1)[0].strip().lower()
             return media_type == "application/json"
+
+        def _write_not_found(self) -> None:
+            self._write_json(404, error_payload("not_found", "endpoint not found"))
+
+        def _write_method_not_allowed(self, path: str) -> None:
+            allowed = KNOWN_ENDPOINT_METHODS.get(path)
+            if not allowed:
+                self._write_not_found()
+                return
+            self._write_json(
+                405,
+                error_payload("method_not_allowed", "method not allowed"),
+                headers={"Allow": ", ".join(allowed)},
+            )
+
+        def _handle_non_get_post(self) -> None:
+            try:
+                path = self._request_path()
+                if path in KNOWN_ENDPOINT_METHODS:
+                    self._write_method_not_allowed(path)
+                    return
+                self._write_not_found()
+            except (OSError, RuntimeError, ValueError, UnicodeError) as exc:
+                self._write_internal_error(exc)
 
         def _read_json_payload(self) -> Mapping[str, Any]:
             content_type = self.headers.get("Content-Type", "")
@@ -374,20 +459,29 @@ def _handler_factory(config: APIConfig) -> type[BaseHTTPRequestHandler]:
 
         def do_GET(self) -> None:
             try:
-                if self.path == "/healthz":
+                path = self._request_path()
+                if path == "/healthz":
                     self._write_json(200, {"status": "ok"})
                     return
-                self._write_json(404, error_payload("not_found", "endpoint not found"))
+                if path in KNOWN_ENDPOINT_METHODS:
+                    self._write_method_not_allowed(path)
+                    return
+                self._write_not_found()
             except (OSError, RuntimeError, ValueError, UnicodeError) as exc:
                 self._write_internal_error(exc)
 
         def do_POST(self) -> None:
             try:
-                if self.path not in ("/v1/passwords", "/v1/usernames"):
-                    self._write_json(404, error_payload("not_found", "endpoint not found"))
+                path = self._request_path()
+                if path not in ("/v1/passwords", "/v1/usernames"):
+                    if path in KNOWN_ENDPOINT_METHODS:
+                        self._write_method_not_allowed(path)
+                    else:
+                        self._write_not_found()
                     return
 
-                client_key = self._client_identity()
+                presented_token = self._presented_bearer_token()
+                client_key = self._auth_throttle_key(path=path, presented_token=presented_token)
                 if auth_throttle.is_blocked(client_key):
                     self._write_json(
                         429,
@@ -398,7 +492,7 @@ def _handler_factory(config: APIConfig) -> type[BaseHTTPRequestHandler]:
                     )
                     return
 
-                if not self._require_auth():
+                if not self._is_authorized(presented_token, expected_token=config.token):
                     if auth_throttle.record_failure(client_key):
                         self._write_json(
                             429,
@@ -440,7 +534,7 @@ def _handler_factory(config: APIConfig) -> type[BaseHTTPRequestHandler]:
                     )
                     return
 
-                if self.path == "/v1/passwords":
+                if path == "/v1/passwords":
                     try:
                         request = build_password_request(payload, max_count=config.max_password_count)
                         result = generate_passwords(request)
@@ -484,6 +578,27 @@ def _handler_factory(config: APIConfig) -> type[BaseHTTPRequestHandler]:
             except (OSError, RuntimeError, ValueError, UnicodeError) as exc:
                 self._write_internal_error(exc)
 
+        def do_HEAD(self) -> None:
+            self.do_GET()
+
+        def do_PUT(self) -> None:
+            self._handle_non_get_post()
+
+        def do_DELETE(self) -> None:
+            self._handle_non_get_post()
+
+        def do_PATCH(self) -> None:
+            self._handle_non_get_post()
+
+        def do_OPTIONS(self) -> None:
+            self._handle_non_get_post()
+
+        def do_TRACE(self) -> None:
+            self._handle_non_get_post()
+
+        def do_CONNECT(self) -> None:
+            self._handle_non_get_post()
+
     return Handler
 
 
@@ -517,7 +632,17 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=int,
         default=_parse_int(os.environ.get("USNPW_API_PORT", str(DEFAULT_PORT)), "USNPW_API_PORT"),
     )
-    parser.add_argument("--token", default="")
+    parser.add_argument(
+        "--token",
+        default="",
+        help="Bearer token value (disabled unless --allow-cli-token is set).",
+    )
+    parser.add_argument(
+        "--allow-cli-token",
+        action="store_true",
+        default=_parse_bool(os.environ.get("USNPW_API_ALLOW_CLI_TOKEN", "false"), "USNPW_API_ALLOW_CLI_TOKEN"),
+        help="Allow reading bearer token from --token (less secure than token-file).",
+    )
     parser.add_argument("--token-file", default=os.environ.get("USNPW_API_TOKEN_FILE", ""))
     parser.add_argument(
         "--allow-env-token",
