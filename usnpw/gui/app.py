@@ -943,7 +943,10 @@ class USnPwApp(tk.Tk):
                         pass
         finally:
             if os.path.exists(tmp_name):
-                os.remove(tmp_name)
+                try:
+                    os.remove(tmp_name)
+                except OSError:
+                    pass
 
     def _export_text(self, widget: ScrolledText, label: str) -> None:
         if not self._confirm_sensitive_action("Exporting output"):
