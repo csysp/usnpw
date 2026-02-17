@@ -347,7 +347,10 @@ def _ensure_user_path_windows(path_entry: Path) -> bool:
         current_path = current_path_raw if isinstance(current_path_raw, str) else ""
         parts = [part for part in current_path.split(";") if part]
         normalized_entry = _normalize_path_for_compare(str(path_entry))
-        desired_parts = [str(path_entry), *[part for part in parts if _normalize_path_for_compare(part) != normalized_entry]]
+        desired_parts = [
+            str(path_entry),
+            *[part for part in parts if _normalize_path_for_compare(part) != normalized_entry],
+        ]
         current_norm = [_normalize_path_for_compare(part) for part in parts]
         desired_norm = [_normalize_path_for_compare(part) for part in desired_parts]
         if current_norm == desired_norm:

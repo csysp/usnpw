@@ -43,7 +43,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=0,
         help="convenience: set entropy size in bits (overrides --bytes when --bytes is 0). Common: 128, 192, 256",
     )
-    parser.add_argument("--out-enc", choices=OUT_ENC_CHOICES, default="hex", help="(hash formats) encoding of digest output")
+    parser.add_argument(
+        "--out-enc",
+        choices=OUT_ENC_CHOICES,
+        default="hex",
+        help="(hash formats) encoding of digest output",
+    )
 
     # Grouping
     parser.add_argument("--group", type=int, default=0, help="group output into chunks of N characters")

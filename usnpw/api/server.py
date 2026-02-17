@@ -599,7 +599,14 @@ def main(argv: list[str] | None = None) -> int:
         config = _build_config(_parse_args(argv))
         return run_server(config)
     except (OSError, ValueError) as exc:
-        print(format_error_text(exc, default_code="startup_error", default_message="api server startup failed"), file=sys.stderr)
+        print(
+            format_error_text(
+                exc,
+                default_code="startup_error",
+                default_message="api server startup failed",
+            ),
+            file=sys.stderr,
+        )
         return 2
 
 

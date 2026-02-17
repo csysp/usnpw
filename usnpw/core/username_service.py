@@ -318,7 +318,13 @@ def generate_usernames(request: UsernameRequest) -> UsernameResult:
             else:
                 for _ in range(request.count):
                     try:
-                        username, scheme_name, sep_used, case_style_used, used_tokens = username_generation.generate_unique(
+                        (
+                            username,
+                            scheme_name,
+                            sep_used,
+                            case_style_used,
+                            used_tokens,
+                        ) = username_generation.generate_unique(
                             username_blacklist_keys=username_blacklist,
                             token_blacklist=token_blacklist,
                             max_len=effective_max_len,

@@ -233,7 +233,17 @@ def scheme_initials_style(state: GenState, pools: RunPools, history_n: int) -> T
         u = u + (sep + num if sep and rand_bool(0.5) else num)
 
     u = add_noise(u, sep)
-    return u, sep, case_style, {normalize_token(a), normalize_token(n), normalize_token(core), normalize_token(initials)}
+    return (
+        u,
+        sep,
+        case_style,
+        {
+            normalize_token(a),
+            normalize_token(n),
+            normalize_token(core),
+            normalize_token(initials),
+        },
+    )
 
 
 DEFAULT_SCHEMES: Tuple[Scheme, ...] = (

@@ -70,8 +70,28 @@ def main(argv: list[str] | None = None) -> int:
 
     steps: list[tuple[str, list[str]]] = [
         ("preflight", [sys.executable, "tools/release.py", "preflight"]),
-        ("fuzz_gui_adapters", [sys.executable, "tools/fuzz_gui_adapters.py", "--iterations", str(args.fuzz_iterations), "--seed", str(args.fuzz_seed)]),
-        ("fuzz_api_adapters", [sys.executable, "tools/fuzz_api_adapters.py", "--iterations", str(args.fuzz_iterations), "--seed", str(args.fuzz_seed)]),
+        (
+            "fuzz_gui_adapters",
+            [
+                sys.executable,
+                "tools/fuzz_gui_adapters.py",
+                "--iterations",
+                str(args.fuzz_iterations),
+                "--seed",
+                str(args.fuzz_seed),
+            ],
+        ),
+        (
+            "fuzz_api_adapters",
+            [
+                sys.executable,
+                "tools/fuzz_api_adapters.py",
+                "--iterations",
+                str(args.fuzz_iterations),
+                "--seed",
+                str(args.fuzz_seed),
+            ],
+        ),
         ("pentest_api", [sys.executable, "tools/pentest_api.py"]),
     ]
 

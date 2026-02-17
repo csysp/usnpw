@@ -31,7 +31,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--safe-mode",
         action="store_true",
-        help="Apply and lock recommended hardening defaults (stream mode, no-save, no-token-save, no-leading-digit, tuned anti-fingerprint knobs).",
+        help=(
+            "Apply and lock recommended hardening defaults "
+            "(stream mode, no-save, no-token-save, no-leading-digit, "
+            "tuned anti-fingerprint knobs)."
+        ),
     )
     parser.add_argument(
         "--profile",
@@ -107,8 +111,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Allow plaintext stream state storage when secure storage is unavailable (not recommended).",
     )
 
-    parser.add_argument("--disallow-prefix", action="append", default=[], help="Disallow usernames starting with prefix.")
-    parser.add_argument("--disallow-substring", action="append", default=[], help="Disallow usernames containing substring.")
+    parser.add_argument(
+        "--disallow-prefix",
+        action="append",
+        default=[],
+        help="Disallow usernames starting with prefix.",
+    )
+    parser.add_argument(
+        "--disallow-substring",
+        action="append",
+        default=[],
+        help="Disallow usernames containing substring.",
+    )
     parser.add_argument(
         "--no-leading-digit",
         dest="no_leading_digit",
