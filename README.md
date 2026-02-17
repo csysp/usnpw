@@ -5,6 +5,26 @@
 
 USnPw is local-first, stdlib-only tooling for secure password generation and OPSEC-focused username generation.
 
+USnPw combines two high-friction security tasks into one auditable toolchain: generating strong secrets and generating profile-aware usernames that avoid predictable output signatures. It is designed for operators, developers, and security teams who need fast generation at scale without handing sensitive workflows to cloud services.
+
+The project pairs hardened defaults with practical usability: a unified CLI, a thin GUI over the same service layer, and release artifacts you can verify with checksums and signatures. No telemetry, no background network calls, and no dependency bloat.
+
+USnPw began as an internal operator utility for cryptographically sound password generation during iterative test cycles. It has since expanded into a unified credential and identity generation platform with explicit security controls across CLI, GUI, and API surfaces.
+
+The operating model is intentionally conservative: offline-first execution, transparent behavior, and fail-closed handling for safety-critical paths. When constraints conflict with hardened posture, USnPw returns explicit errors instead of silently relaxing controls.
+
+For enterprise and security engineering workflows, the value proposition is straightforward: a small, auditable codebase with deterministic release processes, verification artifacts, and policy-aligned defaults that reduce accidental data exposure.
+
+If you want to evaluate quickly, run:
+`usnpw -n 5 -l 24` and `usnpw username -n 20 --profile reddit --safe-mode`.
+
+## Enterprise Team Use Cases
+| Use case | How teams use USnPw |
+|---|---|
+| Security testing pipelines | Generate high-entropy credentials and test identities during CI/CD validation, red-team simulation, and pre-prod hardening exercises. |
+| Private-team identity provisioning | Produce large username batches with profile-aware normalization and anti-fingerprinting controls for internal test programs and staged deployments. |
+| Controlled and offline environments | Run deterministic, auditable generation workflows in restricted networks where external SaaS dependency, telemetry risk, or internet access is unacceptable. |
+
 ## Safety Notice
 Do not use this project for illegal activity. You are responsible for your own use.
 
