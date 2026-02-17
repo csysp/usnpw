@@ -324,8 +324,8 @@ def _default_cli_install_dir() -> Path:
     if os.name == "nt":
         local_appdata = os.environ.get("LOCALAPPDATA")
         if local_appdata:
-            return Path(local_appdata) / "UsnPw" / "bin"
-        return Path.home() / "AppData" / "Local" / "UsnPw" / "bin"
+            return Path(local_appdata) / "usnpw" / "bin"
+        return Path.home() / "AppData" / "Local" / "usnpw" / "bin"
     return Path.home() / ".local" / "bin"
 
 
@@ -492,7 +492,7 @@ def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
     )
     install_cli.add_argument(
         "--install-dir",
-        help="Optional install destination. Defaults to user-local bin (for example %%LOCALAPPDATA%%\\UsnPw\\bin).",
+        help="Optional install destination. Defaults to user-local bin (for example %%LOCALAPPDATA%%\\usnpw\\bin).",
     )
     install_cli.add_argument(
         "--no-path-update",

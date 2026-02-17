@@ -19,6 +19,7 @@ from usnpw.core.models import (
 tk = None
 USnPwApp = None
 
+
 def _is_tkinter_dependency_error(exc: ImportError) -> bool:
     name = getattr(exc, "name", "") or ""
     msg = str(exc).lower()
@@ -72,6 +73,24 @@ class GuiAppSafetyTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         global tk, USnPwApp
         tk, USnPwApp = _load_gui_test_deps()
+
+    def test_is_risky_path_blocks_home_with_parent_segments(self) -> None:
+        dummy = type("Dummy", (), {})()
+        dummy._canonicalize_for_risk = USnPwApp._canonicalize_for_risk.__get__(dummy, object)
+        dummy._normalized_path_value = USnPwApp._normalized_path_value
+
+        home = Path.home()
+        traversed_home = home.parent / ".." / home.parent.name / home.name
+        self.assertTrue(USnPwApp._is_risky_path(dummy, traversed_home))
+
+    def test_is_risky_path_blocks_home_parent_with_parent_segments(self) -> None:
+        dummy = type("Dummy", (), {})()
+        dummy._canonicalize_for_risk = USnPwApp._canonicalize_for_risk.__get__(dummy, object)
+        dummy._normalized_path_value = USnPwApp._normalized_path_value
+
+        home = Path.home()
+        traversed_home_parent = home.parent / ".." / home.parent.name
+        self.assertTrue(USnPwApp._is_risky_path(dummy, traversed_home_parent))
 
     def test_copy_guard_requires_prompt_when_enabled(self) -> None:
         dummy = type("Dummy", (), {})()

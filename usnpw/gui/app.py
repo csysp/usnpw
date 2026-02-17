@@ -193,20 +193,35 @@ class USnPwApp(tk.Tk):
         for line in display_lines:
             widget.insert(tk.END, line + "\n")
 
-    def _is_risky_path(self, path: Path) -> bool:
+    @staticmethod
+    def _normalized_path_value(path: Path) -> str:
+        return os.path.normcase(os.path.normpath(str(path)))
+
+    def _canonicalize_for_risk(self, path: Path) -> Path:
         expanded = path.expanduser()
-        raw = str(expanded)
-        if not raw or raw in (".", ".."):
+        try:
+            return expanded.resolve(strict=False)
+        except OSError:
+            return Path(os.path.abspath(os.path.normpath(str(expanded))))
+
+    def _is_risky_path(self, path: Path) -> bool:
+        raw_input = str(path).strip()
+        if raw_input in ("", ".", ".."):
             return True
-        if raw.startswith("\\\\"):
+
+        canonical = self._canonicalize_for_risk(path)
+        canonical_value = self._normalized_path_value(canonical)
+        if canonical_value.startswith("\\\\"):
             return True
-        anchor = expanded.anchor
-        if anchor and raw == anchor:
+
+        anchor = canonical.anchor
+        if anchor and canonical_value == self._normalized_path_value(Path(anchor)):
             return True
-        home = Path.home()
-        if expanded == home or expanded == home.parent:
-            return True
-        return False
+
+        home = self._canonicalize_for_risk(Path.home())
+        home_value = self._normalized_path_value(home)
+        home_parent_value = self._normalized_path_value(home.parent)
+        return canonical_value in (home_value, home_parent_value)
 
     def _ensure_safe_path(self, path: Path, label: str) -> None:
         if not self.unsafe_path_block.get():
