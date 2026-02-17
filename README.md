@@ -14,7 +14,7 @@ USnPw supports Windows, Linux, and macOS in source mode and in labeled binary mo
 Common release artifact names:
 - `usnpw-windows-cli.exe`, `usnpw-windows-gui.exe`
 - `usnpw-linux-cli`, `usnpw-linux-gui`
-- `usnpw-macos-cli`, `usnpw-macos-gui`
+- `usnpw-macos-cli`, `usnpw-macos-gui.app.zip`
 
 ## Install and Setup
 Use `docs/SETUP.md` for full platform-specific setup, binary install, checksum verification, and troubleshooting.

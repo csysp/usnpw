@@ -247,6 +247,23 @@ def _target_artifact_path(bin_dir: Path, output_base: str) -> Path | None:
     return None
 
 
+def _zip_app_bundle(app_path: Path) -> Path:
+    if not app_path.is_dir() or app_path.suffix != ".app":
+        raise ValueError(f"expected .app directory bundle, got: {app_path}")
+    archive = app_path.with_suffix(app_path.suffix + ".zip")
+    if archive.exists():
+        if archive.is_file():
+            archive.unlink()
+        else:
+            raise ValueError(f"cannot overwrite non-file archive path: {archive}")
+    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
+        for file_path in sorted(p for p in app_path.rglob("*") if p.is_file()):
+            arcname = f"{app_path.name}/{file_path.relative_to(app_path).as_posix()}"
+            zf.write(file_path, arcname=arcname)
+    shutil.rmtree(app_path)
+    return archive
+
+
 def build_binaries(dist_dir: Path, target_keys: Sequence[str]) -> list[Path]:
     targets = _binary_target_map()
     selected: list[BinaryTarget] = [targets[key] for key in target_keys]
@@ -301,6 +318,8 @@ def build_binaries(dist_dir: Path, target_keys: Sequence[str]) -> list[Path]:
             raise RuntimeError(
                 f"expected binary artifact not found for target '{target.key}' ({output_base})"
             )
+        if artifact.is_dir() and artifact.suffix == ".app":
+            artifact = _zip_app_bundle(artifact)
         print(f"[binaries] wrote {artifact}")
         artifacts.append(artifact)
 

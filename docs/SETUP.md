@@ -165,7 +165,7 @@ usnpw username -n 20 --profile reddit --safe-mode
 ```
 
 ## Binary Setup: macOS
-1. Download macOS artifacts (`usnpw-macos-cli`, `usnpw-macos-gui`) and sidecars.
+1. Download macOS artifacts (`usnpw-macos-cli`, `usnpw-macos-gui.app.zip`) and sidecars.
 2. Verify checksum:
 
 ```bash
