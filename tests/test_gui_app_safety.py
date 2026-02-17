@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -359,7 +360,10 @@ class GuiAppSafetyTests(unittest.TestCase):
         ):
             USnPwApp._export_text(dummy, widget, "username data")
 
-        self.assertEqual(exported["path"], out_path)
+        self.assertEqual(
+            os.path.normcase(str(Path(exported["path"]).resolve(strict=False))),
+            os.path.normcase(str(out_path.resolve(strict=False))),
+        )
         self.assertEqual(exported["text"], "  alpha\nbeta  \n")
         self.assertFalse(exported["strict_windows_acl"])
         self.assertEqual(dummy._status_var.value, "Exported output.")
