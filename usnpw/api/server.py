@@ -33,6 +33,8 @@ DEFAULT_AUTH_FAIL_LIMIT = 16
 DEFAULT_AUTH_FAIL_WINDOW_SECONDS = 60
 DEFAULT_AUTH_BLOCK_SECONDS = 300
 DEFAULT_REQUEST_QUEUE_SIZE = 256
+DEFAULT_AUTH_TRACKED_KEYS_MAX = 8192
+DEFAULT_AUTH_CLEANUP_INTERVAL_SECONDS = 30.0
 KNOWN_ENDPOINT_METHODS: dict[str, tuple[str, ...]] = {
     "/healthz": ("GET",),
     "/v1/passwords": ("POST",),
@@ -91,12 +93,22 @@ def _parse_bool(value: str, field: str) -> bool:
 
 
 class AuthThrottle:
-    def __init__(self, *, fail_limit: int, window_seconds: int, block_seconds: int) -> None:
+    def __init__(
+        self,
+        *,
+        fail_limit: int,
+        window_seconds: int,
+        block_seconds: int,
+        max_tracked_keys: int = DEFAULT_AUTH_TRACKED_KEYS_MAX,
+    ) -> None:
         self._fail_limit = fail_limit
         self._window_seconds = window_seconds
         self._block_seconds = block_seconds
+        self._max_tracked_keys = max_tracked_keys
         self._failures: dict[str, deque[float]] = {}
         self._blocked_until: dict[str, float] = {}
+        self._last_seen: dict[str, float] = {}
+        self._next_cleanup_at = 0.0
         self._lock = threading.Lock()
 
     def _prune_failures_locked(self, key: str, now: float) -> deque[float]:
@@ -113,27 +125,76 @@ class AuthThrottle:
             return self._failures[key]
         return events
 
+    def _touch_locked(self, key: str, now: float) -> None:
+        self._last_seen[key] = now
+        self._enforce_key_cap_locked()
+
+    def _enforce_key_cap_locked(self) -> None:
+        overflow = len(self._last_seen) - self._max_tracked_keys
+        if overflow <= 0:
+            return
+        oldest_keys = sorted(self._last_seen.items(), key=lambda kv: kv[1])[:overflow]
+        for stale_key, _ in oldest_keys:
+            self._last_seen.pop(stale_key, None)
+            self._failures.pop(stale_key, None)
+            self._blocked_until.pop(stale_key, None)
+
+    def _cleanup_locked(self, now: float) -> None:
+        tracked = len(self._last_seen)
+        if now < self._next_cleanup_at and tracked <= self._max_tracked_keys:
+            return
+
+        # Prune expired block entries and stale failure windows.
+        threshold = now - float(self._window_seconds)
+        for key in list(self._blocked_until):
+            if self._blocked_until[key] <= now:
+                self._blocked_until.pop(key, None)
+        for key in list(self._failures):
+            events = self._failures.get(key)
+            if events is None:
+                continue
+            while events and events[0] < threshold:
+                events.popleft()
+            if not events:
+                self._failures.pop(key, None)
+
+        active_keys = set(self._failures) | set(self._blocked_until)
+        for key in list(self._last_seen):
+            if key not in active_keys:
+                self._last_seen.pop(key, None)
+
+        # Bound memory growth from high-cardinality auth probes.
+        self._enforce_key_cap_locked()
+
+        self._next_cleanup_at = now + DEFAULT_AUTH_CLEANUP_INTERVAL_SECONDS
+
     def is_blocked(self, key: str, *, now: float | None = None) -> bool:
         current = time.monotonic() if now is None else now
         with self._lock:
+            self._cleanup_locked(current)
             blocked_until = self._blocked_until.get(key)
             if blocked_until is None:
                 return False
+            self._touch_locked(key, current)
             if blocked_until > current:
                 return True
             self._blocked_until.pop(key, None)
+            self._last_seen.pop(key, None)
             return False
 
     def record_failure(self, key: str, *, now: float | None = None) -> bool:
         current = time.monotonic() if now is None else now
         with self._lock:
+            self._cleanup_locked(current)
             blocked_until = self._blocked_until.get(key)
             if blocked_until is not None and blocked_until > current:
+                self._touch_locked(key, current)
                 return True
             if blocked_until is not None and blocked_until <= current:
                 self._blocked_until.pop(key, None)
             events = self._prune_failures_locked(key, current)
             events.append(current)
+            self._touch_locked(key, current)
             if len(events) >= self._fail_limit:
                 self._blocked_until[key] = current + float(self._block_seconds)
                 self._failures.pop(key, None)
@@ -144,6 +205,7 @@ class AuthThrottle:
         with self._lock:
             self._blocked_until.pop(key, None)
             self._failures.pop(key, None)
+            self._last_seen.pop(key, None)
 
 
 class BoundedThreadingHTTPServer(ThreadingHTTPServer):

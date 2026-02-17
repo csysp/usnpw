@@ -10,7 +10,7 @@ import urllib.request
 from pathlib import Path
 from unittest.mock import patch
 
-from usnpw.api.server import APIConfig, _build_config, create_server
+from usnpw.api.server import APIConfig, AuthThrottle, _build_config, create_server
 
 
 class APIServerTests(unittest.TestCase):
@@ -351,6 +351,17 @@ class APIServerTests(unittest.TestCase):
             )
         self.assertEqual(status, 500)
         self.assertEqual(self._error_code(payload), "internal_error")
+
+    def test_auth_throttle_caps_tracked_key_cardinality(self) -> None:
+        throttle = AuthThrottle(
+            fail_limit=4,
+            window_seconds=120,
+            block_seconds=120,
+            max_tracked_keys=8,
+        )
+        for i in range(64):
+            throttle.record_failure(f"k{i}", now=float(i))
+        self.assertLessEqual(len(throttle._last_seen), 8)
 
 
 if __name__ == "__main__":
