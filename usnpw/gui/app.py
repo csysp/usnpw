@@ -816,7 +816,7 @@ class USnPwApp(tk.Tk):
             try:
                 result = task()
                 self._events.put(("ok", (on_ok, result)))
-            except (ValueError, OSError, UnicodeError, RuntimeError) as exc:
+            except (ValueError, OSError, UnicodeError) as exc:
                 self._events.put(("err", (exc, "")))
             except Exception as exc:
                 context = make_error("internal_error", "unexpected background task failure")
