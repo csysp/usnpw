@@ -1,29 +1,29 @@
 # Setup and Installation
 
-This guide covers install and setup for Windows, Linux, and macOS in both source mode and binary mode.
+This guide covers source and binary setup for Windows, Linux, and macOS.
 
 ## Install Modes
-1. Source mode: run the Python entrypoints directly.
-2. Binary mode: run labeled release artifacts (for example `usnpw-<platform>-cli(.exe)`, `usnpw-<platform>-gui(.exe)`).
+USnPw supports two installation patterns:
+1. Source mode: run Python entrypoints directly from the repository.
+2. Binary mode: run release artifacts such as `usnpw-<platform>-cli(.exe)` and `usnpw-<platform>-gui(.exe)`.
 
 ## Prerequisites
 - Python `3.9+` for source mode.
-- No external Python dependencies for runtime (stdlib-only project).
-- Optional for local binary builds: PyInstaller `6.16.0` (required by `tools/release.py` for binary commands).
-- Optional for BIP39 mode: local 2048-word BIP39 wordlist file.
-- Optional for container mode: Docker Engine with BuildKit enabled.
+- No runtime Python dependencies beyond stdlib.
+- PyInstaller `6.16.0` only if you build binaries locally (`tools/release.py` enforces this pin).
+- Optional for BIP39: local 2048-word BIP39 wordlist file.
+- Optional for container mode: Docker Engine with BuildKit.
 
 ## Container Setup (Phase 2 API Baseline)
+This phase provides a hardened non-root container running the stdlib API server for private-network use.
 
-This phase provides a hardened non-root container running the stdlib API adapter for private-network use.
-
-Build image:
+Build:
 
 ```bash
 docker build -t usnpw:local .
 ```
 
-Run API server (requires token):
+Run (token file required):
 
 ```bash
 docker run --rm \
@@ -38,7 +38,7 @@ docker run --rm \
   usnpw:local
 ```
 
-Probe health and make authenticated requests:
+Probe:
 
 ```bash
 curl http://127.0.0.1:8080/healthz
@@ -48,19 +48,12 @@ curl -X POST http://127.0.0.1:8080/v1/passwords \
   -d '{"count":2,"length":24,"format":"password"}'
 ```
 
-Hardening recommendations:
-- Use `USNPW_API_TOKEN_FILE` secret mount instead of plaintext env where possible.
-- `USNPW_API_TOKEN` is disabled by default; only enable it intentionally via `USNPW_API_ALLOW_ENV_TOKEN=true`.
-- Run with `--read-only`, `--tmpfs /tmp`, `--cap-drop ALL`, and `--security-opt no-new-privileges:true`.
-- Set `USNPW_API_MAX_CONCURRENT_REQUESTS`, `USNPW_API_SOCKET_TIMEOUT_SECONDS`, and auth-throttle envs for your expected load profile.
-- If clients traverse untrusted links, terminate TLS in a reverse proxy, or mount cert/key and set `USNPW_API_TLS_CERT_FILE` + `USNPW_API_TLS_KEY_FILE`.
-- Avoid host mounts unless you explicitly need local persistence for stream/token state.
-- Keep container on private networks only during team rollout.
+Operational guidance: prefer `USNPW_API_TOKEN_FILE` over plaintext environment variables; keep `USNPW_API_TOKEN` disabled unless explicitly required; run with read-only root and minimal capabilities; and keep deployments on private networks unless you add explicit TLS and network controls.
 
 ## Source Setup: Windows
+From repository root:
 
 ```powershell
-# from repo root
 py -m venv .venv
 .\.venv\Scripts\Activate.ps1
 py .\tools\release.py preflight
@@ -76,16 +69,16 @@ py .\scripts\opsec_username_gen.py -n 20 --profile reddit
 py .\scripts\usnpw_gui.py
 ```
 
-If PowerShell execution policy blocks activation, run without activation:
+If PowerShell execution policy blocks activation:
 
 ```powershell
 .\.venv\Scripts\python.exe .\scripts\usnpw_gui.py
 ```
 
 ## Source Setup: Linux
+From repository root:
 
 ```bash
-# from repo root
 python3 -m venv .venv
 source .venv/bin/activate
 python3 ./tools/release.py preflight
@@ -102,9 +95,9 @@ python3 ./scripts/usnpw_gui.py
 ```
 
 ## Source Setup: macOS
+From repository root:
 
 ```bash
-# from repo root
 python3 -m venv .venv
 source .venv/bin/activate
 python3 ./tools/release.py preflight
@@ -120,57 +113,51 @@ python3 ./scripts/opsec_username_gen.py -n 20 --profile reddit
 python3 ./scripts/usnpw_gui.py
 ```
 
-Tkinter check (GUI prerequisite):
+Confirm Tkinter before using GUI:
 
 ```bash
 python3 -m tkinter
 ```
 
-If that command fails, use a Python build with Tk support before running `scripts/usnpw_gui.py`.
-
 ## Binary Setup: Windows
-
-1. Download release artifacts for Windows (raw files; no extraction step required).
-2. Keep each binary with its checksum sidecar.
-3. For CLI installs, use `usnpw-windows-cli.exe` and `usnpw-windows-cli.exe.sha256`.
-4. Verify checksum:
+1. Download Windows release artifacts (`usnpw-windows-cli.exe`, `usnpw-windows-gui.exe`, and sidecars).
+2. Verify checksum:
 
 ```powershell
 Get-FileHash .\usnpw-windows-cli.exe -Algorithm SHA256
 Get-Content .\usnpw-windows-cli.exe.sha256
 ```
 
-5. Install CLI to a user-local bin directory and persist PATH:
+3. Install CLI and persist user PATH:
 
 ```powershell
 py .\tools\release.py install-cli --artifact .\usnpw-windows-cli.exe
 ```
 
-6. Restart PowerShell, then run:
+4. Restart PowerShell and validate:
 
 ```powershell
 usnpw -n 5 -l 24
 usnpw username -n 20 --profile reddit --safe-mode
 ```
 
-7. For GUI usage, run the labeled GUI artifact (for example `usnpw-windows-gui.exe`).
+5. Launch GUI with the labeled artifact (`usnpw-windows-gui.exe`).
 
 ## Binary Setup: Linux
-1. Download Linux release artifacts (raw files; no extraction step required).
-2. Keep each binary and checksum sidecar together (for example `usnpw-linux-cli` + `usnpw-linux-cli.sha256`).
-3. Verify checksum:
+1. Download Linux artifacts (`usnpw-linux-cli`, `usnpw-linux-gui`) and sidecars.
+2. Verify checksum:
 
 ```bash
 sha256sum -c usnpw-linux-cli.sha256
 ```
 
-4. Install CLI and persist PATH:
+3. Install CLI and persist PATH:
 
 ```bash
 python3 ./tools/release.py install-cli --artifact ./usnpw-linux-cli
 ```
 
-5. Restart shell, then run:
+4. Restart shell and validate:
 
 ```bash
 usnpw -n 5 -l 24
@@ -178,8 +165,7 @@ usnpw username -n 20 --profile reddit --safe-mode
 ```
 
 ## Binary Setup: macOS
-
-1. Download macOS release artifacts and checksum sidecars (for example `usnpw-macos-cli`, `usnpw-macos-gui`).
+1. Download macOS artifacts (`usnpw-macos-cli`, `usnpw-macos-gui`) and sidecars.
 2. Verify checksum:
 
 ```bash
@@ -193,7 +179,7 @@ cat ./usnpw-macos-cli.sha256
 python3 ./tools/release.py install-cli --artifact ./usnpw-macos-cli
 ```
 
-4. Restart shell, then run:
+4. Restart shell and validate:
 
 ```bash
 usnpw -n 5 -l 24
@@ -201,7 +187,6 @@ usnpw username -n 20 --profile reddit --safe-mode
 ```
 
 ## Build Binaries Locally
-
 Run on each target OS natively:
 
 ```powershell
@@ -218,10 +203,10 @@ python3 ./tools/release.py install-cli
 
 Expected output names:
 - GUI: `usnpw-<platform>-gui(.exe)`
-- Unified CLI artifact: `usnpw-<platform>-cli(.exe)` (install step places command as `usnpw(.exe)`)
-- Extra CLIs: `usnpw-pwgen(.exe)`, `usnpw-username(.exe)`
+- Unified CLI: `usnpw-<platform>-cli(.exe)` (install step exposes `usnpw(.exe)`)
+- Extra CLI binaries: `usnpw-pwgen(.exe)`, `usnpw-username(.exe)`
 
-`tools/release.py binaries` now builds GUI + CLI by default.
+`tools/release.py binaries` builds GUI and unified CLI by default.
 
 ## First-Run Validation
 
@@ -239,30 +224,23 @@ python3 ./scripts/pwgen.py -n 2 -l 24
 python3 ./scripts/opsec_username_gen.py -n 5 --profile reddit
 ```
 
-You should see output lines and no traceback.
+Expected result: outputs are generated without traceback.
 
 ## Common Setup Issues
-
 ### `py` not found on Windows
-Use full Python launcher path or install Python with launcher support, then rerun.
+Install Python with launcher support or run Python by full path, then retry.
 
 ### `python3` not found on Linux/macOS
-Install Python `3.9+` and retry.
+Install Python `3.9+` and rerun setup.
 
 ### GUI does not launch
-Verify Tkinter support:
-
-```bash
-python3 -m tkinter
-```
+Validate Tkinter support with `python3 -m tkinter` and use a Python build that includes Tk.
 
 ### `No wordlist path set`
 For BIP39 mode, pass `--bip39-wordlist <path-to-2048-word-file>`.
 
 ### `PyInstaller version mismatch` during binary build
-`tools/release.py` enforces a pinned local build version: `pyinstaller==6.16.0`.
-
-Fix:
+Local binary commands require `pyinstaller==6.16.0`:
 
 ```powershell
 py -m pip install pyinstaller==6.16.0
@@ -273,19 +251,15 @@ python3 -m pip install pyinstaller==6.16.0
 ```
 
 ### `ModuleNotFoundError: No module named 'usnpw'` when running `usnpw`
-This usually means your shell is still resolving an older CLI binary from another directory.
-
-On Windows, check which binary is active:
+Your shell is resolving an older binary from another path entry. On Windows, inspect active resolution:
 
 ```powershell
 Get-Command usnpw | Select-Object -ExpandProperty Source
 ```
 
-Then reinstall from the current build and restart the shell:
+Then reinstall from current artifacts and restart shell:
 
 ```powershell
 py .\tools\release.py binaries
 py .\tools\release.py install-cli
 ```
-
-If `Get-Command usnpw` still points somewhere else, remove older `usnpw(.exe)` locations from earlier `PATH` entries.

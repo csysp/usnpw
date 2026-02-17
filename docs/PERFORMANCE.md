@@ -1,27 +1,22 @@
 # Performance Notes
 
-USnPw is stdlib-only and optimized for auditability and operational safety. Performance depends heavily on:
-- username mode (`stream` vs `blacklist`)
-- whether token blocking is enabled (can saturate at high counts)
-- platform profile canonicalization rules
-- persistence choices (locks + disk I/O)
+USnPw is stdlib-only and optimized for auditability and operational safety. Runtime performance varies mainly with uniqueness mode (`stream` vs `blacklist`), token blocking pressure at high counts, platform-specific canonicalization rules, and persistence choices (locks plus disk I/O).
 
-## Bench Script
-`tools/bench.py` provides a lightweight, repeatable baseline benchmark using the same service layer as CLI/GUI.
+## Benchmark Script
+`tools/bench.py` provides a lightweight baseline benchmark using the same service layer as CLI and GUI paths.
 
-Example (Windows):
+Windows examples:
+
 ```powershell
 py .\tools\bench.py --usernames 5000 --profile reddit
 py .\tools\bench.py --passwords 5000 --length 24
 ```
 
-Example (Linux/macOS):
+Linux/macOS examples:
+
 ```bash
 python3 ./tools/bench.py --usernames 5000 --profile reddit
 python3 ./tools/bench.py --passwords 5000 --length 24
 ```
 
-Notes:
-- The default bench configuration avoids persistence and disables token blocking to prevent saturation in large runs.
-- Treat benchmark output as informational only. It is not a security test.
-
+The default benchmark configuration avoids persistence and disables token blocking to reduce saturation artifacts in large runs. Treat benchmark output as informational capacity data, not as a security test.

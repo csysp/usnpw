@@ -2,10 +2,10 @@
 ## We do not encourage any kind of nefarious activity or crime using this or any software created or owned by us. You are fully responsible for your actions.
 ## Human Written "Project Vision" Context
 This is a personal project that began with a simple need to generate cryptographically sound passwords quickly from CLI for iterative testing purposes (Pw).  
-A second small project, the "OPSEC Username Generator (USn)" was added later to complement the password generation. Once combined they form a powerful opsec tool for mass deployments or single use generations.
-This project is currently a few .py scripts for internal use and iteration but will be expanded into a GUI app in the future.
-Once completed, USnPw will function as a fully fledged "sensitive use" OPESEC account name and password creator, with deep anti-fingerprinting, anti-deterministic username generations across thousands of name generations. 
-Password generation included randomness (derived from os.urandom) hashing and encoding processes including hex, base64/base64url, crock32/crock32check, base58/base58check, uuid, sha256, blake2b, and even bip39 with only english supported currently. 
+A second small project, the "OPSEC Username Generator (USn)", was added later to complement password generation. Combined, they form a practical OPSEC tool for single-use and mass-generation workflows.
+This project started as a set of internal Python scripts and evolved into a full CLI and GUI toolchain.
+USnPw is intended to become a fully fledged sensitive-use account name and password creator, with deep anti-fingerprinting and non-deterministic username generation across large output volumes.
+Password generation includes randomness from `os.urandom` and supports formats/encodings such as hex, base64/base64url, crock32/crock32check, base58/base58check, uuid, sha256, blake2b, and BIP39 (English only today).
 
 ## Mission
 Build a small, auditable FOSS CLI for high-privacy username and secret generation.
@@ -93,7 +93,7 @@ Prioritize OPSEC and anti-fingerprinting over everything else.
 - `py .\tools\release.py preflight` for compile + unit-test gate.
 - `py .\tools\release.py bundle` to build a timestamped source artifact (`usnpw-source-<stamp>.zip`) in `.\dist\`.
 - `py .\tools\release.py checksums --artifact <zip>` to write a SHA-256 sidecar.
-- `py .\tools\release.py binaries` to build default host-native binaries (`usnpw-<platform>-gui` + `usnpw-cli`).
+- `py .\tools\release.py binaries` to build default host-native binaries (`usnpw-<platform>-gui` + `usnpw-<platform>-cli`).
 - `py .\tools\release.py install-cli` to install the CLI command (`usnpw`) into a user-local bin and persist PATH.
 - `py .\tools\release.py all` for end-to-end source release prep.
 - `py .\tools\release.py all --with-binaries` for source + host-native binary release prep.
@@ -105,13 +105,13 @@ Prioritize OPSEC and anti-fingerprinting over everything else.
   - GHCR container images are cosign-signed by CI on tag publishes.
 
 ## Local-Only Notes
-- Keep sensitive/operator notes out of git history (ex: `Github Audit For Agent.md`).
+- Keep sensitive/operator notes out of git history (for example: `GitHub Audit For Agent.md`).
 - Prefer `.git/info/exclude` for local-only ignore rules to avoid changing repo policy.
 
 ## Future Additions
 - "Red Team" anti-anti-fingerprinting tool
 - CSysP site integration for demonstrative display/site traffic
 - Low bloat quantum ready passwords?
-- Codeberg hosted, Github mirrored public repo with fully auditable and buildable versions.
+- Codeberg-hosted, GitHub-mirrored public repo with fully auditable and buildable versions.
 - Entropy Counter Tool
-- Re-Write in Rust
+- Rewrite in Rust

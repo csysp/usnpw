@@ -1,85 +1,66 @@
 # Stream State (Uniqueness) Operations
 
-This document explains how stream uniqueness works, where stream state lives, and how to recover safely if state or locks become problematic.
+This guide explains stream uniqueness behavior, persistence semantics, and safe recovery workflows.
 
 ## What Stream Mode Does
-In `stream` uniqueness mode, USnPw derives a per-profile key from:
-- a secret (root secret), and
-- a counter (monotonic integer).
+In `stream` mode, USnPw derives per-profile generation behavior from a secret plus a monotonic counter. Each emitted username consumes counter space. The design goal is uniqueness-by-construction without maintaining a full historical username ledger.
 
-Each generated username consumes counter space. The goal is uniqueness-by-construction without maintaining a full historical ledger.
+## Storage Paths
+Default state path (when persistence is enabled and no explicit path is set):
 
-## Where Stream State Is Stored
-Default stream-state path (when persistence is enabled and no explicit path is set):
-- `~/.opsec_username_stream_<profile>.json`
+`~/.opsec_username_stream_<profile>.json`
 
-Lock file path:
-- `<state>.lock` (same directory)
+Lock path:
+
+`<state>.lock` (same directory as the state file)
 
 ## OS Behavior
-- Windows:
-  - Stream secret is persisted encrypted via DPAPI when persistence is enabled.
-- Linux/macOS:
-  - By default, persistent stream state is disabled (no plaintext secret on disk).
-  - Plaintext persistence requires explicit opt-in (`--allow-plaintext-stream-state`).
+On Windows, persisted stream secrets are protected with DPAPI. On Linux and macOS, plaintext stream-state persistence is blocked by default and requires explicit opt-in (`--allow-plaintext-stream-state`). If persistence is disabled, stream state remains in memory for the run.
 
-If persistence is disabled, USnPw uses an in-memory secret for the run.
+## Recommended Operating Pattern
+Keep stream state isolated per profile and per tenant/persona. Never share stream-state files across unrelated teams, and never commit state files to source control.
 
-## Recommended Operational Patterns
-- Keep state per profile and per tenant/persona.
-- Do not share stream-state files across unrelated teams.
-- Do not commit state files to source control.
-
-## Common Failures And Recovery
-
-### 1. Lock Timeout Errors
+## Common Failures and Recovery
+### Lock timeout errors
 Symptom:
-- `Timed out waiting for stream state lock ...`
+
+`Timed out waiting for stream state lock ...`
 
 Likely causes:
-- Another process is actively generating usernames using the same stream-state file.
-- A prior process crashed and left a lock behind.
+- Another process is actively writing the same state path.
+- A prior process left a stale lock file.
 
-Recovery steps:
-1. Verify there is no other active USnPw process using the same state path.
-2. If you are confident no process is active, remove the lock file (`<state>.lock`).
-3. Re-run with an explicit, writable `--stream-state` path if directory permissions are the issue.
+Recovery:
+1. Confirm no active process is using the same stream-state path.
+2. If you are certain no process is active, remove the lock file (`<state>.lock`).
+3. If permission issues persist, rerun with an explicit writable `--stream-state` path.
 
-Note:
-- Locks have a heartbeat and stale locks may be reclaimed automatically after a staleness threshold.
+Note: lock heartbeat and stale lock reclamation are built in, so stale locks may self-clear after the staleness threshold.
 
-### 2. Corrupted Or Unreadable State File
-Symptoms:
-- `Unable to read stream state file ...`
-- `Invalid stream state format ...`
-- `Unsupported stream state version ...`
+### Corrupted or unreadable state file
+Common errors:
 
-Recovery steps:
-1. Preserve the file for forensics:
-   - rename the file instead of deleting it.
-2. To continue generation without persistence:
-   - run with `--no-stream-state-persist` (ephemeral run).
-3. To reset the stream state for that persona:
-   - delete the state file and lock file, then re-run.
+`Unable to read stream state file ...`
 
-Tradeoff:
-- Resetting state can allow re-use of previously generated usernames across runs.
+`Invalid stream state format ...`
 
-### 3. Plaintext State Blocked On Non-Windows
+`Unsupported stream state version ...`
+
+Recovery:
+1. Preserve the file for forensics by renaming it.
+2. Continue without persistence using `--no-stream-state-persist`.
+3. If reset is required, remove state and lock files and rerun.
+
+Tradeoff: resetting state can allow previously generated usernames to reappear across runs.
+
+### Plaintext state blocked on non-Windows
 Symptom:
-- `Plaintext stream state is blocked on this OS by default. Pass --allow-plaintext-stream-state to proceed.`
 
-Options:
-1. Prefer the default behavior (in-memory stream state) when you do not need cross-run uniqueness.
-2. If you require persistence on non-Windows:
-   - pass `--allow-plaintext-stream-state` and set a dedicated `--stream-state` path.
+`Plaintext stream state is blocked on this OS by default. Pass --allow-plaintext-stream-state to proceed.`
 
-Threat reminder:
-- Plaintext stream-state persistence leaks a secret that influences future generation behavior.
+Guidance: keep default in-memory behavior unless cross-run uniqueness is required. If you must persist on non-Windows, pass `--allow-plaintext-stream-state` and use a dedicated `--stream-state` path.
+
+Threat reminder: plaintext stream-state persistence stores a secret that influences future generation behavior.
 
 ## Container Notes
-In container/API mode, treat persistence as an explicit opt-in:
-- mount only the minimum required state/token paths
-- keep each deployment isolated (per team/tenant/profile)
-- prefer single-replica deployments unless you have explicitly designed shared-state locking semantics
-
+In API and container deployments, treat persistence as an explicit opt-in. Mount only required state/token paths, isolate each deployment by tenant/profile, and prefer single-replica operation unless shared-state locking semantics are explicitly designed and tested.

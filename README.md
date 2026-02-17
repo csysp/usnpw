@@ -1,18 +1,23 @@
 # USnPw
-[![Release Artifacts](https://github.com/csysp/UsnPw/actions/workflows/release-artifacts.yml/badge.svg)](https://github.com/csysp/UsnPw/actions/workflows/release-artifacts.yml)[![Container GHCR](https://github.com/csysp/UsnPw/actions/workflows/container-ghcr.yml/badge.svg)](https://github.com/csysp/UsnPw/actions/workflows/container-ghcr.yml)[![CodeQL](https://github.com/csysp/UsnPw/actions/workflows/github-code-scanning/codeql/badge.svg)](https://github.com/csysp/UsnPw/actions/workflows/github-code-scanning/codeql)
+[![Release Artifacts](https://github.com/csysp/UsnPw/actions/workflows/release-artifacts.yml/badge.svg)](https://github.com/csysp/UsnPw/actions/workflows/release-artifacts.yml)
+[![Container GHCR](https://github.com/csysp/UsnPw/actions/workflows/container-ghcr.yml/badge.svg)](https://github.com/csysp/UsnPw/actions/workflows/container-ghcr.yml)
+[![CodeQL](https://github.com/csysp/UsnPw/actions/workflows/github-code-scanning/codeql/badge.svg)](https://github.com/csysp/UsnPw/actions/workflows/github-code-scanning/codeql)
 
-Local-first, stdlib-only tooling for secure password generation and OPSEC-focused username generation.
+USnPw is local-first, stdlib-only tooling for secure password generation and OPSEC-focused username generation.
 
 ## Safety Notice
 Do not use this project for illegal activity. You are responsible for your own use.
 
 ## Platform Support
-- Windows (source mode + labeled binary artifacts such as `usnpw-windows-cli.exe`, `usnpw-windows-gui.exe`)
-- Linux (source mode + labeled binary artifacts such as `usnpw-linux-cli`, `usnpw-linux-gui`)
-- macOS (source mode + labeled binary artifacts such as `usnpw-macos-cli`, `usnpw-macos-gui`)
+USnPw supports Windows, Linux, and macOS in source mode and in labeled binary mode.
+
+Common release artifact names:
+- `usnpw-windows-cli.exe`, `usnpw-windows-gui.exe`
+- `usnpw-linux-cli`, `usnpw-linux-gui`
+- `usnpw-macos-cli`, `usnpw-macos-gui`
 
 ## Install and Setup
-Use `docs/SETUP.md` for complete platform-specific setup, binary install, checksum verification, and troubleshooting.
+Use `docs/SETUP.md` for full platform-specific setup, binary install, checksum verification, and troubleshooting.
 
 Quick source run:
 
@@ -30,16 +35,18 @@ source .venv/bin/activate
 python3 ./scripts/usnpw_gui.py
 ```
 
-## What You Get
-- `scripts/pwgen.py`: password/token generator
-- `scripts/opsec_username_gen.py`: anti-fingerprinting username generator
-- `scripts/usnpw_cli.py`: unified CLI wrapper (`password` default, `username` subcommand)
-- `scripts/usnpw_gui.py`: cross-platform GUI using the same service layer as CLI
-- `usnpw/core/*`: reusable API layer
-- No telemetry, no network calls, no external runtime dependencies
+## Core Entrypoints
+| Path | Purpose |
+|---|---|
+| `scripts/pwgen.py` | Password and token generator |
+| `scripts/opsec_username_gen.py` | Anti-fingerprinting username generator |
+| `scripts/usnpw_cli.py` | Unified CLI wrapper (`password` default, `username` subcommand) |
+| `scripts/usnpw_gui.py` | Cross-platform GUI using the same service layer as CLI |
+| `usnpw/core/*` | Reusable generation and policy services |
+
+No telemetry, no runtime network calls, and no external Python runtime dependencies.
 
 ## Quick Usage
-
 ```powershell
 # Windows
 py .\scripts\usnpw_cli.py -n 5 -l 24
@@ -59,34 +66,24 @@ python3 ./scripts/usnpw_gui.py
 ```
 
 ## Supported Username Profiles
-- `generic`
-- `reddit`
-- `x`
-- `github`
-- `discord`
-- `facebook`
-- `linkedin`
-- `instagram`
-- `pinterest`
-- `snapchat`
-- `telegram`
-- `tiktok`
-- `douyin`
-- `vk`
-- `youtube`
+`generic`, `reddit`, `x`, `github`, `discord`, `facebook`, `linkedin`, `instagram`, `pinterest`, `snapchat`, `telegram`, `tiktok`, `douyin`, `vk`, `youtube`
 
 ## Documentation
-- `docs/SETUP.md`: install and setup for Windows, Linux, and macOS
-- `docs/ADVANCED_USAGE.md`: advanced tuning, OPSEC tradeoffs, and troubleshooting
-- `docs/ARCHITECTURE.md`: module boundaries and API model
-- `docs/DOCKER_CHECKLIST.md`: phased Docker/GHCR implementation plan
-- `docs/PERFORMANCE.md`: baseline performance notes and bench script
-- `docs/RELEASE_SIGNING.md`: signing for release artifacts and containers
-- `docs/STREAM_STATE.md`: stream-state persistence behavior and recovery
-- `docs/INDEX.md`: docs map
-- `CONTRIBUTING.md`: contribution workflow
-- `SECURITY.md`: vulnerability reporting policy
-- `THREAT_MODEL.md`: security goals, non-goals, and threat model
+Use `docs/INDEX.md` for the full document map.
+
+Key guides:
+| File | Focus |
+|---|---|
+| `docs/SETUP.md` | Setup and install (Windows, Linux, macOS) |
+| `docs/ADVANCED_USAGE.md` | Operational tuning and OPSEC tradeoffs |
+| `docs/ARCHITECTURE.md` | Module boundaries and contracts |
+| `docs/DOCKER_CHECKLIST.md` | Docker/GHCR implementation checklist |
+| `docs/PERFORMANCE.md` | Baseline performance notes |
+| `docs/RELEASE_SIGNING.md` | Artifact and container signing |
+| `docs/STREAM_STATE.md` | Stream-state persistence and recovery |
+| `CONTRIBUTING.md` | Contribution workflow |
+| `SECURITY.md` | Vulnerability reporting policy |
+| `THREAT_MODEL.md` | Security goals, non-goals, and assumptions |
 
 ## Programmatic API
 ```python
@@ -99,47 +96,45 @@ un = generate_usernames(UsernameRequest(count=20, profile="reddit"))
 ```
 
 ## Container Distribution (GHCR)
-Image format:
+Image reference format:
 
 ```text
 ghcr.io/<owner>/<image>:<tag>
 ```
 
-UsnPw image examples:
+Examples:
 
 ```text
 ghcr.io/csysp/usnpw:sha-<commit>
 ghcr.io/csysp/usnpw:v1.0.0
 ```
 
-Private package pull (if package visibility is private):
+Private pull (if the package is private):
 
 ```bash
 echo "$GHCR_READ_TOKEN" | docker login ghcr.io -u <github-username> --password-stdin
 docker pull ghcr.io/csysp/usnpw:v1.0.0
 ```
 
-Private-network runtime summary:
-- API listens on `8080` in container.
-- Requests to `POST /v1/passwords` and `POST /v1/usernames` require `Authorization: Bearer <USNPW_API_TOKEN>`.
-- Prefer `USNPW_API_TOKEN_FILE` secret mount over plaintext `USNPW_API_TOKEN` env.
-- `USNPW_API_TOKEN` is blocked by default unless `USNPW_API_ALLOW_ENV_TOKEN=true` is set.
-- Keep deployments on internal/private networks and run with `--read-only`, `--tmpfs /tmp`, `--cap-drop ALL`, and `--security-opt no-new-privileges:true`.
-- For untrusted networks, terminate TLS in front of the service or provide `USNPW_API_TLS_CERT_FILE` + `USNPW_API_TLS_KEY_FILE`.
+Runtime summary:
+- The API listens on `8080` in the container.
+- `POST /v1/passwords` and `POST /v1/usernames` require `Authorization: Bearer <USNPW_API_TOKEN>`.
+- Prefer `USNPW_API_TOKEN_FILE` secret mounts over plaintext `USNPW_API_TOKEN`.
+- Keep deployments private; for untrusted links, terminate TLS upstream or provide `USNPW_API_TLS_CERT_FILE` and `USNPW_API_TLS_KEY_FILE`.
 
 ## Development and Release
 ```powershell
-# compile + tests
+# Compile + tests
 py .\tools\release.py preflight
 
-# build default binaries (gui + cli), then install CLI globally for current user
+# Build default binaries (gui + cli), then install CLI for current user
 py .\tools\release.py binaries
 py .\tools\release.py install-cli
 
-# source artifact + checksums
+# Source artifact + checksums
 py .\tools\release.py all
 
-# source + host-native binaries + checksums
+# Source + host-native binaries + checksums
 py .\tools\release.py all --with-binaries
 ```
 
@@ -152,17 +147,19 @@ python3 ./tools/release.py all
 python3 ./tools/release.py all --with-binaries
 ```
 
-Notes:
+Build notes:
 - Build binaries natively on each target OS (no cross-compilation in this workflow).
 - PyInstaller is pinned to `6.16.0`; `tools/release.py` hard-fails on version mismatch.
 
 ## Repository Layout
-- `scripts/pwgen.py`, `scripts/opsec_username_gen.py`, `scripts/usnpw_cli.py`, `scripts/usnpw_gui.py`: entrypoints
-- `usnpw/core/*`: engines, policies, storage, stream state, service orchestration
-- `usnpw/cli/*`: CLI parsing and command dispatch
-- `usnpw/gui/*`: GUI app and adapter mapping
-- `tests/*`: stdlib unit tests
-- `tools/release.py`: preflight/release automation
+| Path | Role |
+|---|---|
+| `scripts/*` | Compatibility entrypoints |
+| `usnpw/core/*` | Engines, policies, storage, stream state, and services |
+| `usnpw/cli/*` | CLI parsing and dispatch |
+| `usnpw/gui/*` | GUI app and adapter mapping |
+| `tests/*` | Stdlib unit tests |
+| `tools/release.py` | Preflight and release automation |
 
 ## License
 This project is licensed under GNU GPLv3 (`GPL-3.0-only`). See `LICENSE`.

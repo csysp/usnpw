@@ -1,29 +1,17 @@
 # Contributing
 
 ## Scope
-- Keep changes minimal, auditable, and stdlib-first.
-- Preserve hardened defaults and OPSEC posture.
-- Avoid adding dependencies unless explicitly justified.
+Keep contributions minimal, auditable, and stdlib-first. Preserve hardened defaults and OPSEC posture. Avoid new dependencies unless clearly justified and reviewed.
 
 ## Development Workflow
 1. Create a focused branch.
 2. Implement a small, reviewable change.
-3. Run:
-   - `py .\tools\release.py preflight`
-4. Include tests for behavioral changes.
-5. Open a PR with:
-   - problem statement
-   - approach/tradeoffs
-   - validation evidence
+3. Run `py .\tools\release.py preflight`.
+4. Add or update tests for behavioral changes.
+5. Open a PR that includes the problem statement, approach and tradeoffs, and validation evidence.
 
 ## Coding Standards
-- No telemetry, analytics, or network calls.
-- No silent security/privacy failures.
-- Keep `usnpw/core/*` reusable and CLI/GUI thin.
-- Prefer explicit, actionable error messages.
+No telemetry or hidden network behavior. No silent security or privacy failures. Keep `usnpw/core/*` reusable and keep CLI and GUI layers thin. Error messages should be explicit and actionable.
 
 ## Security-Sensitive Changes
-- Any change to uniqueness logic, stream state, token persistence, or export crypto must include:
-  - threat-model rationale
-  - failure mode description
-  - migration/compatibility note if relevant
+Changes to uniqueness logic, stream state, token persistence, or export crypto must document threat-model rationale, failure behavior, and migration or compatibility notes when relevant.

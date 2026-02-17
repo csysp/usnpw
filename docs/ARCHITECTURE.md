@@ -1,39 +1,39 @@
 # Architecture
 
 ## Top-Level Layout
-- `scripts/pwgen.py`, `scripts/opsec_username_gen.py`, `scripts/usnpw_cli.py`, `scripts/usnpw_gui.py`: compatibility entrypoints
-- `scripts/usnpw_api.py`: compatibility entrypoint for stdlib HTTP API server
-- `usnpw/__main__.py`: package entrypoint for `py -m usnpw`
-- `usnpw/cli/*`: argument parsing + command execution
-- `usnpw/gui/*`: Tkinter UI + adapter mapping
-- `usnpw/api/*`: thin network adapter for private-network service use
-- `usnpw/core/*`: reusable generation, policy, storage, and crypto APIs
-- `tests/*`: stdlib unit tests
-- `tools/release.py`: preflight/release automation
+| Path | Purpose |
+|---|---|
+| `scripts/pwgen.py`, `scripts/opsec_username_gen.py`, `scripts/usnpw_cli.py`, `scripts/usnpw_gui.py` | Compatibility entrypoints |
+| `scripts/usnpw_api.py` | Compatibility entrypoint for stdlib HTTP API server |
+| `usnpw/__main__.py` | Package entrypoint (`py -m usnpw`) |
+| `usnpw/cli/*` | Argument parsing and command execution |
+| `usnpw/gui/*` | Tkinter UI and request adapters |
+| `usnpw/api/*` | Thin network adapter for private-network use |
+| `usnpw/core/*` | Reusable generation, policy, storage, and crypto services |
+| `tests/*` | Stdlib unit tests |
+| `tools/release.py` | Preflight and release automation |
 
 ## Core Module Fleet
-- `password_engine.py`: low-level password/token generation primitives
-- `password_service.py`: request validation + orchestration for password generation
-- `username_lexicon.py`: word pools and run-pool construction
-- `username_schemes.py`: scheme/state logic and token-cap computations
-- `username_generation.py`: unique + stream-unique generation pipelines
-- `username_uniqueness.py`: anti-pattern checks, tag layout, saturation messaging
-- `username_stream_state.py`: stream state locking/persistence/scrambling
-- `username_storage.py`: blacklist/token file persistence helpers
-- `username_policies.py`: per-platform normalization/policy definitions
-- `export_crypto.py`: encrypted export transforms
-- `dpapi.py`: Windows DPAPI wrappers
-- `models.py`: typed request/response contracts
-- `services.py`: public service-level convenience exports
-- `api/adapters.py`: strict JSON request parsing and hardened API defaults
-- `api/server.py`: `ThreadingHTTPServer` API adapter over service layer
+| Module | Responsibility |
+|---|---|
+| `password_engine.py` | Low-level password/token primitives |
+| `password_service.py` | Password request validation and orchestration |
+| `username_lexicon.py` | Token pools and run-pool construction |
+| `username_schemes.py` | Scheme logic and token-cap computations |
+| `username_generation.py` | Unique and stream-unique generation pipelines |
+| `username_uniqueness.py` | Anti-pattern checks, tag layout, saturation messaging |
+| `username_stream_state.py` | Stream-state locking, persistence, and scrambling |
+| `username_storage.py` | Blacklist and token persistence helpers |
+| `username_policies.py` | Per-platform normalization and policy definitions |
+| `export_crypto.py` | Encrypted export transforms |
+| `dpapi.py` | Windows DPAPI wrappers |
+| `models.py` | Typed request and response contracts |
+| `services.py` | Public convenience exports |
+| `api/adapters.py` | Strict JSON mapping and hardened API defaults |
+| `api/server.py` | `ThreadingHTTPServer` API adapter over service layer |
 
 ## Boundary Rules
-- `core/*` is treated as reusable library surface.
-- CLI and GUI should not duplicate generation logic.
-- API adapters should not duplicate generation logic; they only map and validate request payloads.
-- Stream state, storage, and uniqueness are separated to keep failure domains explicit.
+`core/*` is reusable library surface. CLI, GUI, and API layers should map inputs and outputs only, without duplicating generation logic. Stream state, persistence, and uniqueness logic remain separated to keep failure domains explicit and testable.
 
 ## Validation Gate
-- Primary gate: `py .\tools\release.py preflight`
-- Includes compile checks and unit suite before release/binary workflows.
+Primary gate: `py .\tools\release.py preflight` (compile checks and unit tests).

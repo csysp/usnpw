@@ -1,38 +1,28 @@
 ---
 name: Bug report
-about: Create a report to help us improve
-title: ''
-labels: ''
-assignees: ''
-
+about: Report a reproducible defect in CLI, GUI, API, or release workflows
+title: "[bug] "
+labels: bug
+assignees: ""
 ---
 
-**Describe the bug**
-A clear and concise description of what the bug is.
+## Summary
+Provide a clear, concise description of the bug.
 
-**To Reproduce**
-Steps to reproduce the behavior:
-1. Go to '...'
-2. Click on '....'
-3. Scroll down to '....'
-4. See error
+## Reproduction
+1. Describe the exact command or workflow.
+2. Include input flags or config values.
+3. Include observed output, error text, or traceback.
 
-**Expected behavior**
-A clear and concise description of what you expected to happen.
+## Expected Result
+Describe what should have happened.
 
-**Screenshots**
-If applicable, add screenshots to help explain your problem.
+## Environment
+- OS and version:
+- Python version (`python --version` or `py --version`):
+- Execution mode: source / binary / container
+- If binary: exact artifact name (for example `usnpw-windows-cli.exe`)
+- If relevant: shell used (PowerShell, bash, zsh, etc.)
 
-**Desktop (please complete the following information):**
- - OS: [e.g. iOS]
- - Browser [e.g. chrome, safari]
- - Version [e.g. 22]
-
-**Smartphone (please complete the following information):**
- - Device: [e.g. iPhone6]
- - OS: [e.g. iOS8.1]
- - Browser [e.g. stock browser, safari]
- - Version [e.g. 22]
-
-**Additional context**
-Add any other context about the problem here.
+## Additional Context
+Include anything that helps triage quickly (recent changes, related logs, screenshots, or suspected root cause).

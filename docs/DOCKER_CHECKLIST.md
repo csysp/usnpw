@@ -1,120 +1,57 @@
-# Docker/GHCR Implementation Checklist
+# Docker and GHCR Checklist
 
-Branch scope: `docker` branch only until stable.
-
-Design goal: least-invasive containerization for private-network team use, with no changes to `usnpw/core/*` generation behavior.
+Branch scope: `docker` branch until stabilization.  
+Design goal: least-invasive containerization for private-network team use, with no behavior changes to `usnpw/core/*`.
 
 ## Phase 0: Planning and Guardrails
+- [x] Define phased plan and file-level scope in `docs/DOCKER_CHECKLIST.md`.
+- [x] Keep security defaults explicit: fail closed, no telemetry, no hidden persistence.
+- [x] Document `usnpw/api/*` boundaries in `docs/ARCHITECTURE.md`.
 
-### `docs/DOCKER_CHECKLIST.md`
-- [x] Define phased plan and file-by-file changes.
-- [x] Keep security defaults explicit (fail closed, no telemetry, no hidden persistence).
+## Phase 1: Runtime Container Baseline
+- [x] `.dockerignore` excludes `.git`, `dist/`, `__pycache__/`, local temp/state files, and virtual environments.
+- [x] `Dockerfile` uses multi-stage build (`preflight` then minimal runtime image).
+- [x] Runtime executes as non-root.
+- [x] Safe runtime defaults are set (`PYTHONDONTWRITEBYTECODE`, `PYTHONUNBUFFERED`).
+- [x] OCI labels include source and description metadata.
+- [x] Runtime image remains stdlib-only.
+- [x] `docs/SETUP.md` includes local build/run quickstart and hardened runtime flags.
 
-### `docs/ARCHITECTURE.md`
-- [x] Add `usnpw/api/*` boundary notes (thin adapter over service layer).
-- [x] State that container/API adapters must not duplicate generation logic.
+## Phase 2: API Adapter (stdlib only)
+- [x] `usnpw/api/__init__.py` exposes public API symbols only.
+- [x] `usnpw/api/adapters.py` validates JSON payloads, rejects unknown fields, and enforces ceilings.
+- [x] API defaults apply hardened username posture.
+- [x] `usnpw/api/server.py` serves `GET /healthz`, `POST /v1/passwords`, and `POST /v1/usernames`.
+- [x] Bearer token auth required for generation endpoints.
+- [x] Responses are JSON-only; stack traces are not returned to clients.
+- [x] Server avoids logging generated secrets and usernames.
+- [x] `scripts/usnpw_api.py` remains a thin bootstrap wrapper.
+- [x] `tests/test_api_adapters.py` and `tests/test_api_server.py` cover mapping, auth, happy paths, and fail-closed paths.
 
-## Phase 1: Runtime Container Baseline (No Publish Yet)
+## Phase 3: GHCR Workflow
+- [x] `.github/workflows/container-ghcr.yml` has build-only paths for PR/push.
+- [x] Publish paths run on tag/manual triggers with scoped permissions.
+- [x] GHCR login uses `${{ github.actor }}` with `${{ secrets.GITHUB_TOKEN }}`.
+- [x] Build/push runs via `docker/build-push-action`.
+- [x] Tag strategy covers commit SHA, branch, and semver tags.
+- [x] OCI source label links image metadata back to repository.
+- [x] `README.md` includes GHCR reference format and private-network runtime summary.
 
-### `.dockerignore`
-- [x] Exclude `.git`, `dist/`, `__pycache__/`, local state/temp files, venvs.
-- [x] Keep runtime surface small and deterministic.
-
-### `Dockerfile`
-- [x] Multi-stage build:
-  - Stage A: run `python tools/release.py preflight`.
-  - Stage B: minimal runtime image only.
-- [x] Run as non-root user.
-- [x] Set safe runtime env defaults (`PYTHONDONTWRITEBYTECODE`, `PYTHONUNBUFFERED`).
-- [x] Add OCI label placeholders:
-  - `org.opencontainers.image.source`
-  - `org.opencontainers.image.description`
-- [x] Keep final image stdlib-only (no new Python deps).
-
-### `docs/SETUP.md`
-- [x] Add local Docker build/run quickstart.
-- [x] Add hardened runtime flags (`read_only`, `tmpfs`, dropped caps).
-
-## Phase 2: API Adapter for Team Serving (Stdlib Only)
-
-### `usnpw/api/__init__.py`
-- [x] Public API module exports only.
-
-### `usnpw/api/adapters.py`
-- [x] Parse/validate JSON payloads to `PasswordRequest` / `UsernameRequest`.
-- [x] Reject unknown fields and invalid types with explicit errors.
-- [x] Enforce request ceilings (`count`, length window, payload size).
-- [x] Apply hardened defaults for username generation in API mode.
-
-### `usnpw/api/server.py`
-- [x] Implement `ThreadingHTTPServer` + `BaseHTTPRequestHandler`.
-- [x] Endpoints:
-  - [x] `GET /healthz`
-  - [x] `POST /v1/passwords`
-  - [x] `POST /v1/usernames`
-- [x] Require bearer token auth via env (`USNPW_API_TOKEN`) by default.
-- [x] Return JSON-only responses; never return stack traces to clients.
-- [x] Do not log generated secrets/usernames.
-
-### `scripts/usnpw_api.py`
-- [x] Thin bootstrap wrapper (same style as existing `scripts/*.py` wrappers).
-
-### `tests/test_api_adapters.py`
-- [x] Validate payload mapping, unknown-field rejection, bounds checks.
-
-### `tests/test_api_server.py`
-- [x] Validate auth required path.
-- [x] Validate happy path for both generation endpoints.
-- [x] Validate invalid JSON / oversize body fail-closed behavior.
-
-## Phase 3: GHCR Workflow (Build, Then Publish)
-
-### `.github/workflows/container-ghcr.yml`
-- [x] Build-only job on PR/push (no publish).
-- [x] Publish job on tag/manual trigger:
-  - [x] `permissions: contents: read`
-  - [x] `permissions: packages: write`
-  - [x] Login with `docker/login-action` to `ghcr.io` using `${{ github.actor }}` + `${{ secrets.GITHUB_TOKEN }}`
-  - [x] Build/push with `docker/build-push-action`
-  - [x] Tag strategy: `sha-*`, branch tag, semver tag.
-- [x] Attach OCI source label so package links to repo cleanly.
-
-### `README.md`
-- [x] Add GHCR image reference format:
-  - `ghcr.io/<owner>/<image>:<tag>`
-- [x] Add private network deployment summary and auth expectations.
-
-## Phase 4: Private-Network Ops Hardening
-
-### `docker-compose.private.yml` (optional but recommended)
-- [x] Internal-network deployment example.
-- [x] Read-only root fs.
-- [x] `tmpfs` mounts for writable paths.
-- [x] `security_opt: no-new-privileges:true`
-- [x] Drop all capabilities unless explicitly required.
-- [x] Bind service to private interface only.
-
-### `docs/ADVANCED_USAGE.md`
-- [x] Add operational guidance:
-  - [x] token/blacklist/state volume behavior under concurrency
-  - [x] single-replica default unless shared-state strategy is explicit
-  - [x] auth token rotation and log hygiene
+## Phase 4: Private-Network Hardening
+- [x] `docker-compose.private.yml` provides internal-network example.
+- [x] Runtime profile uses read-only root, tmpfs, `no-new-privileges`, and dropped capabilities.
+- [x] Service binding targets private interfaces.
+- [x] `docs/ADVANCED_USAGE.md` documents persistence behavior under concurrency, replica strategy, and token/log hygiene.
 
 ## Phase 5: Merge Readiness (`docker` -> `main`)
-
-### Validation gates
 - [x] `py tools/release.py preflight` passes.
-- [x] Container build job green.
-- [x] API unit tests green.
-- [x] GHCR publish tested on tag/manual trigger.
-- [x] Basic private-network smoke test completed.
-
-### Git workflow
-- [x] Keep Docker work isolated on `docker`.
+- [x] Container build job is green.
+- [x] API unit tests are green.
+- [x] GHCR publish is validated on tag/manual triggers.
+- [x] Private-network smoke test is complete.
 - [ ] Rebase `docker` onto `main` before merge.
-- [ ] Squash or structured commits with clear scope.
+- [ ] Squash or structure commits with clear scopes.
 
-## Notes
-- GHCR reference docs:
-  - https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry
-  - https://docs.github.com/en/actions/use-cases-and-examples/publishing-packages/publishing-docker-images
+## References
+- https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry
+- https://docs.github.com/en/actions/use-cases-and-examples/publishing-packages/publishing-docker-images

@@ -1,40 +1,27 @@
 # USnPw Advanced Usage
 
-This guide focuses on advanced operational use of:
+This guide covers advanced operation of:
 - `scripts/usnpw_cli.py`
 - `scripts/pwgen.py`
 - `scripts/opsec_username_gen.py`
 - `scripts/usnpw_gui.py`
 
-For install/setup, use `docs/SETUP.md`.
+For installation and basic setup, use `docs/SETUP.md`.
 
 ## Command Conventions
-- Windows examples use `py .\scripts\...`
-- Linux/macOS equivalents use `python3 ./scripts/...`
-- Unified wrapper:
-  - password mode is default (`usnpw -n 5 -l 24`)
-  - username mode uses `username` subcommand (`usnpw username -n 20 --profile reddit`)
+Windows examples use `py .\scripts\...`. Linux and macOS equivalents use `python3 ./scripts/...`.
+
+The unified wrapper defaults to password mode (`usnpw -n 5 -l 24`). Username mode is explicit (`usnpw username -n 20 --profile reddit`).
 
 ## Username Generation: Operating Strategy
+### Choose Uniqueness Mode Deliberately
+Use `stream` mode (default) when privacy and low artifact creation matter most. It provides uniqueness-by-construction from secret state and a counter, without a full username ledger. Use `blacklist` mode only when a persistent username ledger is an explicit operational requirement.
 
-### 1. Choose Uniqueness Mode Intentionally
-1. `stream` mode (default): no username ledger required, uniqueness from stream state.
-2. `blacklist` mode: uniqueness from a persisted username ledger file.
+### Understand Stream-State Behavior by OS
+On Windows, stream state can persist with DPAPI protection when persistence is enabled. On Linux and macOS, persistence is blocked by default unless you allow plaintext stream state explicitly with `--allow-plaintext-stream-state`. If you want an intentionally ephemeral run on any OS, use `--no-stream-state-persist`.
 
-Use `stream` for privacy-first workflows unless a persistent ledger is explicitly required.
-
-### 2. Understand Stream-State Behavior by OS
-1. Windows:
-Stream-state secret can be persisted with DPAPI protection.
-2. Non-Windows:
-If plaintext state is not explicitly allowed, stream state stays in-memory for the run.
-3. Explicit ephemeral run on any OS:
-Use `--no-stream-state-persist`.
-4. Non-Windows explicit state persistence:
-Use `--allow-plaintext-stream-state` and set `--stream-state <path>`.
-
-### 3. Keep Persona Files Isolated
-Use separate files per persona for token/state/blacklist artifacts.
+### Keep Persona Files Isolated
+Use dedicated token and stream-state paths per persona.
 
 ```powershell
 py .\scripts\opsec_username_gen.py -n 150 --profile reddit `
@@ -42,14 +29,14 @@ py .\scripts\opsec_username_gen.py -n 150 --profile reddit `
   --stream-state "$env:USERPROFILE\.u_stream_reddit_personaA.json"
 ```
 
-If strict ephemerality is required:
+For strict ephemerality:
 
 ```powershell
 py .\scripts\opsec_username_gen.py -n 150 --profile reddit `
   --no-stream-state-persist --no-token-block --no-token-save --no-save
 ```
 
-### 4. High-Volume Baseline (Anti-Fingerprinting)
+### High-Volume Baseline (Anti-Fingerprinting)
 
 ```powershell
 py .\scripts\opsec_username_gen.py -n 200 --profile reddit `
@@ -59,40 +46,23 @@ py .\scripts\opsec_username_gen.py -n 200 --profile reddit `
   --token-blacklist "$env:USERPROFILE\.u_tokens_reddit.txt"
 ```
 
-To avoid strict generation-order consumption:
+If you want to avoid strict generation-order consumption in downstream processing:
 
 ```powershell
 py .\scripts\opsec_username_gen.py -n 200 --profile reddit | Sort-Object {Get-Random}
 ```
 
-### 5. Tune Diversity Knobs
-1. `--max-scheme-pct`:
-Lower values reduce dominant scheme repetition, but too low increases saturation risk.
-2. `--history`:
-Higher values reduce near-term style repeats.
-3. `--pool-scale`:
-Higher values increase run-local vocabulary spread.
-4. `--initials-weight`:
-Set to `0` for stricter anti-signature posture.
-5. `--no-leading-digit`:
-Removes leading-digit pattern class.
+### Tune Diversity Controls
+| Control | Effect | Practical range |
+|---|---|---|
+| `--max-scheme-pct` | Reduces dominant scheme repetition; values that are too low increase saturation pressure | `0.22` to `0.35` |
+| `--history` | Reduces short-window style repeats | `8` to `14` |
+| `--pool-scale` | Expands run-local token diversity | `3` to `6` |
+| `--initials-weight` | Controls initials-style prevalence | `0` for strict posture |
+| `--no-leading-digit` | Removes leading-digit pattern class | enabled for hardened posture |
 
-Suggested ranges:
-1. `--max-scheme-pct`: `0.22` to `0.35`
-2. `--history`: `8` to `14`
-3. `--pool-scale`: `3` to `6`
-4. `--initials-weight`: `0` for strict posture
-
-### 6. Handle Token Saturation
-When token blocking is enabled, capacity is finite. You can hit:
-- theoretical capacity errors
-- saturation before target count
-
-Recovery options:
-1. Lower `-n`.
-2. Rotate/clear token blacklist.
-3. Increase `--max-scheme-pct` modestly.
-4. Use `--no-token-block` for non-strict runs.
+### Handle Token Saturation
+When token blocking is enabled, capacity is finite. If you hit token-capacity errors, reduce `-n`, rotate or clear token blacklists, increase `--max-scheme-pct` slightly, or run without token blocking (`--no-token-block`) for non-strict operations.
 
 Cleanup example:
 
@@ -100,20 +70,11 @@ Cleanup example:
 Remove-Item "$env:USERPROFILE\.u_tokens_reddit.txt" -Force -ErrorAction SilentlyContinue
 ```
 
-### 7. Persistence Tradeoffs
-Username ledger controls:
-- `--no-save` (default)
-- `--save` (explicit persistence)
+### Persistence Tradeoffs
+`--no-save` and `--no-token-save` remain the hardened defaults. Enable persistence only when your operational model requires cross-run continuity, and scope files per persona and profile.
 
-Token controls:
-- `--no-token-save` (default)
-- `--token-save`
-- `--stream-save-tokens` (stream mode only)
-
-Persist only when required by your operational model.
-
-### 8. Content Constraints
-Use constraints to enforce your own naming boundaries:
+### Content Constraints
+Use explicit prefix and substring blocks when operational policy requires it.
 
 ```powershell
 py .\scripts\opsec_username_gen.py -n 100 --profile generic `
@@ -121,10 +82,8 @@ py .\scripts\opsec_username_gen.py -n 100 --profile generic `
   --disallow-substring test --disallow-substring bot
 ```
 
-### 9. Profile-Aware Generation
-`--profile` applies canonicalization and length policy for each target platform.
-
-Examples:
+### Profile-Aware Generation
+Profiles apply platform-specific canonicalization and length policy.
 
 ```powershell
 py .\scripts\opsec_username_gen.py -n 25 --profile x
@@ -133,38 +92,23 @@ py .\scripts\opsec_username_gen.py -n 25 --profile telegram
 py .\scripts\opsec_username_gen.py -n 25 --profile vk
 ```
 
-### 10. Metadata Hygiene
-`--show-meta` emits scheme/separator/case diagnostics.
-Treat this as sensitive output.
+### Metadata Hygiene
+`--show-meta` emits internal generation metadata (scheme, separator, case). Treat this as sensitive output and keep it off unless you are debugging distribution behavior.
 
-### 11. Safe Mode Conflict Behavior
-When `--safe-mode` is enabled, conflicting options now fail closed with an explicit CLI error.
-
-Examples of conflicting options:
-1. `--save`
-2. `--token-save`
-3. `--no-token-block`
-4. `--stream-save-tokens`
-5. `--allow-leading-digit`
-6. non-default anti-fingerprint knobs such as `--max-scheme-pct`, `--history`, `--pool-scale`, `--initials-weight`
+### Safe Mode Conflict Behavior
+With `--safe-mode`, conflicting options fail closed. Conflicts include persistence flags (`--save`, `--token-save`, `--stream-save-tokens`), de-hardening flags (`--no-token-block`, `--allow-leading-digit`), and non-default anti-fingerprint knobs (`--max-scheme-pct`, `--history`, `--pool-scale`, `--initials-weight`).
 
 ## Password Generator: Advanced Use
+### Select Output Type by Use Case
+Use `--format bip39` for human memorization workflows. Use token formats (`hex`, `base64url`, `base58`) for credentials and key material. Use hash-style formats (`sha256`, `sha512`, `sha3_256`, `sha3_512`, `blake2b`, `blake2s`) when deterministic hash text is needed.
 
-### 1. Select Output Type by Use Case
-1. Human memorization:
-`--format bip39`
-2. Key material and tokens:
-`--format hex`, `--format base64url`, `--format base58`
-3. Hash-token style output:
-`--format sha256`, `sha512`, `sha3_256`, `sha3_512`, `blake2b`, `blake2s`
-
-### 2. Entropy Planning
+### Entropy Planning
 
 ```powershell
 # 256-bit URL-safe token
 py .\scripts\pwgen.py --format base64url --bits 256
 
-# 512-bit max-entropy preset (post-quantum margin)
+# 512-bit max-entropy preset
 py .\scripts\pwgen.py --max-entropy
 
 # 32-byte hex token
@@ -174,87 +118,43 @@ py .\scripts\pwgen.py --format hex --bytes 32
 py .\scripts\pwgen.py --format bip39 --words 24 --bip39-wordlist .\path\to\bip39_english.txt
 ```
 
-### 3. Grouping Rules
+### Grouping Behavior
 
 ```powershell
 py .\scripts\pwgen.py --format base58check --bits 256 --group 4 --group-sep "-"
 py .\scripts\pwgen.py --format hex --bits 136 --group 4 --group-pad "0"
 ```
 
-Behavior:
-1. `--bytes > 0` overrides `--bits`.
-2. `--bits` must be a multiple of `8`.
-3. Grouping is not applied to `uuid` and `bip39`.
-4. `--max-entropy` forces 64 bytes (`512` bits) and base64url output.
+Rules: `--bytes > 0` overrides `--bits`; `--bits` must be a multiple of `8`; grouping is not applied to `uuid` or `bip39`; and `--max-entropy` forces 64 bytes with base64url output.
 
 ## GUI Notes (Safety-Centric)
-`scripts/usnpw_gui.py` uses the same service layer as CLI.
+`scripts/usnpw_gui.py` uses the same service layer as CLI. The GUI safety model combines hardened safe-mode defaults, strict/session-only controls, copy guard, auto-clear timers, panic clear, encrypted export, and unsafe-path blocking for file-destructive actions.
 
-Safety controls include:
-1. Safe mode lock for hardened username settings.
-2. Strict lock/session-only controls.
-3. Copy guard and clipboard auto-clear timer.
-4. Output auto-clear timer and panic clear.
-5. Optional encrypted export on Windows.
-6. Unsafe path blocking and maintenance helpers.
+## Container Operations Hardening
+In API mode, defaults favor no persistence. If you relax those controls, keep token, blacklist, and stream-state paths scoped per tenant/profile and define writer coordination explicitly.
 
-## Container Ops Hardening
+Default to a single replica unless you have a formal shared-state strategy. Multi-replica deployments require explicit lock semantics, profile/state affinity, and saturation testing before production.
 
-### 1. Token/Blacklist/State Volume Behavior
-By default, API mode enforces no username/token persistence and no stream-state persistence.
-
-If you explicitly relax those controls later, mount only the minimum path required and keep it per-tenant:
-1. token blacklist path and username blacklist path should be dedicated per deployment.
-2. stream state path should be dedicated per profile and tenant.
-3. never share state/token files across unrelated teams or identities.
-
-### 2. Replica Strategy
-Default to a single API replica unless you intentionally design shared-state coordination.
-
-Why:
-1. token/state persistence semantics become harder to reason about with parallel writers.
-2. anti-fingerprinting and uniqueness guarantees are easiest to audit in single-replica mode.
-
-If multi-replica is required:
-1. define shared storage locking semantics explicitly.
-2. pin deterministic routing for profile/state affinity.
-3. load-test saturation behavior before production rollout.
-
-### 3. Auth Token Rotation and Log Hygiene
-1. prefer `USNPW_API_TOKEN_FILE` secret mounts over plaintext env injection.
-2. keep `USNPW_API_ALLOW_ENV_TOKEN` disabled unless you have no file-based secret path.
-3. rotate bearer tokens on a fixed cadence and after any host/container compromise.
-4. keep `USNPW_API_ACCESS_LOG` disabled unless debugging; if enabled, treat logs as sensitive metadata.
-5. do not write generated passwords/usernames to centralized logs.
-6. terminate TLS at a trusted boundary or configure in-process TLS cert/key for untrusted network segments.
+Use file-backed token secrets (`USNPW_API_TOKEN_FILE`) instead of plaintext environment injection whenever possible, rotate tokens on schedule, and treat access logs as sensitive metadata.
 
 ## Troubleshooting
-
 ### `bits must be a multiple of 8`
-Cause: invalid `--bits` for token/hash outputs.
-Fix: use values like `128`, `192`, `256` or set `--bytes`.
+Use bit sizes such as `128`, `192`, or `256`, or set `--bytes` directly.
 
 ### `No wordlist path set`
-Cause: BIP39 mode without `--bip39-wordlist`.
-Fix: provide path to a valid local 2048-word BIP39 list.
+BIP39 mode requires `--bip39-wordlist` pointing to a valid local 2048-word list.
 
 ### `--min-len cannot be greater than --max-len`
-Cause: invalid username length window.
-Fix: ensure `min <= max`.
+Set a valid inclusive length window (`min <= max`).
 
 ### `invalid choice: '<profile>'`
-Cause: unsupported profile value.
-Fix: run `py .\scripts\opsec_username_gen.py --help` and choose a listed profile.
+Run `py .\scripts\opsec_username_gen.py --help` and use a supported profile.
 
 ### Token-capacity errors
-Cause: token blocking cannot satisfy requested count.
-Fix: lower count, rotate token blacklist, or relax constraints.
+Lower count, rotate token state, or relax constraints.
 
 ### Stream-state lock or permission errors
-Fix:
-1. Use a writable explicit `--stream-state` path.
-2. Remove stale lock only if no active process is using it.
-3. On non-Windows, prefer in-memory run behavior when plaintext state is not needed.
+Use a writable explicit `--stream-state` path; remove stale lock files only when no active process owns them; and prefer ephemeral behavior on non-Windows when plaintext persistence is not needed.
 
 ## Release and CI
 
@@ -270,6 +170,4 @@ python3 ./tools/release.py all
 python3 ./tools/release.py all --with-binaries
 ```
 
-Phase 4 CI builds native artifacts for Windows, Linux, and macOS with pinned PyInstaller (`6.16.0`), and local `tools/release.py` enforces the same version for binary commands.
-
-`tools/security_audit.py` is intentionally local-only and refuses to run in CI unless explicitly overridden with `--allow-ci`.
+CI builds native artifacts for Windows, Linux, and macOS with pinned PyInstaller (`6.16.0`). Local binary commands enforce the same version pin. `tools/security_audit.py` is local-only unless overridden with `--allow-ci`.
