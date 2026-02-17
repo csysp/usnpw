@@ -858,7 +858,10 @@ class USnPwApp(tk.Tk):
                     msg, tb = payload if isinstance(payload, tuple) else (str(payload), "")
                     self._status_var.set(format_error_status(msg))
                     if tb:
-                        print(tb, file=sys.stderr)
+                        if os.environ.get("USNPW_GUI_VERBOSE_ERRORS", "").strip().lower() in ("1", "true", "yes", "on"):
+                            print(tb, file=sys.stderr)
+                        else:
+                            print("internal_error: RuntimeError", file=sys.stderr)
                 self._set_busy(False)
         except queue.Empty:
             pass

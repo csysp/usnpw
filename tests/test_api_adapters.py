@@ -56,6 +56,16 @@ class APIAdapterTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "bits must be <= 8192"):
             build_password_request({"count": 1, "bits": 8193})
 
+    def test_password_request_enforces_group_separator_length_cap(self) -> None:
+        with self.assertRaisesRegex(ValueError, "group_sep must be <= 16 characters"):
+            build_password_request({"count": 1, "group_sep": ("x" * 17)})
+
+    def test_password_request_enforces_projected_output_budget(self) -> None:
+        with self.assertRaisesRegex(ValueError, "projected password output is too large"):
+            build_password_request(
+                {"count": 512, "length": 4096, "format": "password", "group": 1, "group_sep": ("x" * 16)}
+            )
+
     def test_username_request_enforces_hardened_fields(self) -> None:
         request = build_username_request(
             {
@@ -81,6 +91,11 @@ class APIAdapterTests(unittest.TestCase):
         self.assertFalse(request.show_meta)
         self.assertFalse(request.allow_plaintext_stream_state)
         self.assertFalse(request.stream_state_persist)
+
+    def test_username_request_enforces_filter_list_bounds(self) -> None:
+        oversized = [f"prefix{i}" for i in range(129)]
+        with self.assertRaisesRegex(ValueError, "disallow_prefix must contain <= 128 entries"):
+            build_username_request({"count": 1, "disallow_prefix": oversized})
 
     def test_username_request_rejects_policy_locked_fields(self) -> None:
         with self.assertRaisesRegex(ValueError, "not configurable in API mode"):

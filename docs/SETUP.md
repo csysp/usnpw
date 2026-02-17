@@ -48,7 +48,7 @@ curl -X POST http://127.0.0.1:8080/v1/passwords \
   -d '{"count":2,"length":24,"format":"password"}'
 ```
 
-Operational guidance: prefer `USNPW_API_TOKEN_FILE` over plaintext environment variables; keep `USNPW_API_TOKEN` disabled unless explicitly required; run with read-only root and minimal capabilities; and keep deployments on private networks unless you add explicit TLS and network controls.
+Operational guidance: prefer `USNPW_API_TOKEN_FILE` over plaintext environment variables; keep `USNPW_API_TOKEN` disabled unless explicitly required; use owner-only token file permissions on POSIX (`chmod 600`); run with read-only root and minimal capabilities; and keep deployments on private networks. Non-loopback binds require TLS by default unless you explicitly opt in to insecure mode.
 
 API runtime hardening controls are enabled by default. For load-abuse tuning details, use `docs/ADVANCED_USAGE.md`.
 

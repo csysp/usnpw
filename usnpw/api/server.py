@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import hmac
+import ipaddress
 import json
 import os
 import socket
@@ -40,6 +41,7 @@ DEFAULT_REQUEST_QUEUE_SIZE = 256
 DEFAULT_AUTH_TRACKED_KEYS_MAX = 8192
 DEFAULT_AUTH_CLEANUP_INTERVAL_SECONDS = 30.0
 DEFAULT_MIN_TOKEN_LENGTH = 24
+DEFAULT_MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 KNOWN_ENDPOINT_METHODS: dict[str, tuple[str, ...]] = {
     "/healthz": ("GET",),
     "/v1/passwords": ("POST",),
@@ -68,8 +70,10 @@ class APIConfig:
     request_rate_limit: int = DEFAULT_REQUEST_RATE_LIMIT
     request_rate_window_seconds: int = DEFAULT_REQUEST_RATE_WINDOW_SECONDS
     request_rate_block_seconds: int = DEFAULT_REQUEST_RATE_BLOCK_SECONDS
+    max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES
     tls_cert_file: str = ""
     tls_key_file: str = ""
+    allow_insecure_no_tls: bool = False
 
 
 def _parse_int(value: str, field: str) -> int:
@@ -99,6 +103,20 @@ def _parse_bool(value: str, field: str) -> bool:
     if raw in ("0", "false", "no", "off", ""):
         return False
     raise ValueError(f"{field} must be a boolean")
+
+
+def _is_loopback_host(host: str) -> bool:
+    raw = host.strip().lower()
+    if not raw:
+        return False
+    if raw == "localhost":
+        return True
+    if raw.startswith("[") and raw.endswith("]"):
+        raw = raw[1:-1]
+    try:
+        return ipaddress.ip_address(raw).is_loopback
+    except ValueError:
+        return False
 
 
 class AuthThrottle:
@@ -438,6 +456,18 @@ def _read_token_file(path: str) -> str:
     token_path = Path(path).expanduser()
     if not token_path.is_file():
         raise ValueError(f"token file not found: {token_path}")
+    if os.name != "nt":
+        try:
+            st = token_path.stat()
+        except OSError as exc:
+            raise ValueError(f"unable to stat token file '{token_path}': {exc}") from exc
+        if st.st_mode & 0o077:
+            raise ValueError(
+                f"token file permissions are too broad: {token_path}. "
+                "Use owner-only permissions (chmod 600)."
+            )
+        if hasattr(os, "geteuid") and st.st_uid != os.geteuid():
+            raise ValueError(f"token file must be owned by the current user: {token_path}")
     try:
         token = token_path.read_text(encoding="utf-8").strip()
     except OSError as exc:
@@ -445,6 +475,61 @@ def _read_token_file(path: str) -> str:
     if not token:
         raise ValueError(f"token file is empty: {token_path}")
     return token
+
+
+def _validate_api_config(config: APIConfig) -> None:
+    if not config.host.strip():
+        raise ValueError("host must be non-empty")
+    if not config.token:
+        raise ValueError("token must be non-empty")
+    if len(config.token) < DEFAULT_MIN_TOKEN_LENGTH:
+        raise ValueError(
+            f"token must be at least {DEFAULT_MIN_TOKEN_LENGTH} characters; use a random 32+ character token"
+        )
+    if config.port < 0:
+        raise ValueError("port must be >= 0")
+    if config.max_body_bytes <= 0:
+        raise ValueError("max-body-bytes must be > 0")
+    if config.max_password_count <= 0:
+        raise ValueError("max-password-count must be > 0")
+    if config.max_username_count <= 0:
+        raise ValueError("max-username-count must be > 0")
+    if config.max_concurrent_requests <= 0:
+        raise ValueError("max-concurrent-requests must be > 0")
+    if config.max_concurrent_requests_per_client <= 0:
+        raise ValueError("max-concurrent-requests-per-client must be > 0")
+    if config.max_concurrent_requests_per_client > config.max_concurrent_requests:
+        raise ValueError("max-concurrent-requests-per-client must be <= max-concurrent-requests")
+    if config.socket_timeout_seconds <= 0:
+        raise ValueError("socket-timeout-seconds must be > 0")
+    if config.auth_fail_limit <= 0:
+        raise ValueError("auth-fail-limit must be > 0")
+    if config.auth_fail_window_seconds <= 0:
+        raise ValueError("auth-fail-window-seconds must be > 0")
+    if config.auth_block_seconds <= 0:
+        raise ValueError("auth-block-seconds must be > 0")
+    if config.request_rate_limit <= 0:
+        raise ValueError("request-rate-limit must be > 0")
+    if config.request_rate_window_seconds <= 0:
+        raise ValueError("request-rate-window-seconds must be > 0")
+    if config.request_rate_block_seconds <= 0:
+        raise ValueError("request-rate-block-seconds must be > 0")
+    if config.max_response_bytes <= 0:
+        raise ValueError("max-response-bytes must be > 0")
+    if bool(config.tls_cert_file) != bool(config.tls_key_file):
+        raise ValueError("tls-cert-file and tls-key-file must be set together")
+    if config.tls_cert_file:
+        cert_path = Path(config.tls_cert_file).expanduser()
+        key_path = Path(config.tls_key_file).expanduser()
+        if not cert_path.is_file():
+            raise ValueError(f"tls cert file not found: {cert_path}")
+        if not key_path.is_file():
+            raise ValueError(f"tls key file not found: {key_path}")
+    elif not _is_loopback_host(config.host) and not config.allow_insecure_no_tls:
+        raise ValueError(
+            "TLS is required when binding a non-loopback host. "
+            "Set --tls-cert-file/--tls-key-file, or pass --allow-insecure-no-tls to opt in."
+        )
 
 
 def _build_config(args: argparse.Namespace) -> APIConfig:
@@ -475,10 +560,6 @@ def _build_config(args: argparse.Namespace) -> APIConfig:
             "USNPW_API_TOKEN_FILE is required "
             "(or use USNPW_API_TOKEN with --allow-env-token, or opt in to --token with --allow-cli-token)"
         )
-    if len(token) < DEFAULT_MIN_TOKEN_LENGTH:
-        raise ValueError(
-            f"token must be at least {DEFAULT_MIN_TOKEN_LENGTH} characters; use a random 32+ character token"
-        )
 
     if args.port <= 0:
         raise ValueError("port must be > 0")
@@ -495,6 +576,7 @@ def _build_config(args: argparse.Namespace) -> APIConfig:
     request_rate_limit = int(getattr(args, "request_rate_limit", DEFAULT_REQUEST_RATE_LIMIT))
     request_rate_window_seconds = int(getattr(args, "request_rate_window_seconds", DEFAULT_REQUEST_RATE_WINDOW_SECONDS))
     request_rate_block_seconds = int(getattr(args, "request_rate_block_seconds", DEFAULT_REQUEST_RATE_BLOCK_SECONDS))
+    max_response_bytes = int(getattr(args, "max_response_bytes", DEFAULT_MAX_RESPONSE_BYTES))
 
     if max_concurrent_requests <= 0:
         raise ValueError("max-concurrent-requests must be > 0")
@@ -516,6 +598,8 @@ def _build_config(args: argparse.Namespace) -> APIConfig:
         raise ValueError("request-rate-window-seconds must be > 0")
     if request_rate_block_seconds <= 0:
         raise ValueError("request-rate-block-seconds must be > 0")
+    if max_response_bytes <= 0:
+        raise ValueError("max-response-bytes must be > 0")
 
     tls_cert_file = (args.tls_cert_file or "").strip()
     tls_key_file = (args.tls_key_file or "").strip()
@@ -531,7 +615,7 @@ def _build_config(args: argparse.Namespace) -> APIConfig:
         tls_cert_file = str(cert_path)
         tls_key_file = str(key_path)
 
-    return APIConfig(
+    config = APIConfig(
         host=args.host,
         port=args.port,
         token=token,
@@ -547,9 +631,13 @@ def _build_config(args: argparse.Namespace) -> APIConfig:
         request_rate_limit=request_rate_limit,
         request_rate_window_seconds=request_rate_window_seconds,
         request_rate_block_seconds=request_rate_block_seconds,
+        max_response_bytes=max_response_bytes,
         tls_cert_file=tls_cert_file,
         tls_key_file=tls_key_file,
+        allow_insecure_no_tls=bool(getattr(args, "allow_insecure_no_tls", False)),
     )
+    _validate_api_config(config)
+    return config
 
 
 def _handler_factory(config: APIConfig) -> type[BaseHTTPRequestHandler]:
@@ -582,6 +670,17 @@ def _handler_factory(config: APIConfig) -> type[BaseHTTPRequestHandler]:
             headers: Mapping[str, str] | None = None,
         ) -> None:
             body = json.dumps(payload, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+            if len(body) > config.max_response_bytes:
+                code = 413
+                close = True
+                body = json.dumps(
+                    error_payload(
+                        "response_too_large",
+                        f"response body too large (>{config.max_response_bytes} bytes)",
+                    ),
+                    separators=(",", ":"),
+                    ensure_ascii=True,
+                ).encode("utf-8")
             self.send_response(code)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
@@ -906,6 +1005,7 @@ def _handler_factory(config: APIConfig) -> type[BaseHTTPRequestHandler]:
 
 
 def create_server(config: APIConfig) -> ThreadingHTTPServer:
+    _validate_api_config(config)
     handler = _handler_factory(config)
     server = BoundedThreadingHTTPServer(
         (config.host, config.port),
@@ -1053,8 +1153,25 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "USNPW_API_REQUEST_RATE_BLOCK_SECONDS",
         ),
     )
+    parser.add_argument(
+        "--max-response-bytes",
+        type=int,
+        default=_parse_int(
+            os.environ.get("USNPW_API_MAX_RESPONSE_BYTES", str(DEFAULT_MAX_RESPONSE_BYTES)),
+            "USNPW_API_MAX_RESPONSE_BYTES",
+        ),
+    )
     parser.add_argument("--tls-cert-file", default=os.environ.get("USNPW_API_TLS_CERT_FILE", ""))
     parser.add_argument("--tls-key-file", default=os.environ.get("USNPW_API_TLS_KEY_FILE", ""))
+    parser.add_argument(
+        "--allow-insecure-no-tls",
+        action="store_true",
+        default=_parse_bool(
+            os.environ.get("USNPW_API_ALLOW_INSECURE_NO_TLS", "false"),
+            "USNPW_API_ALLOW_INSECURE_NO_TLS",
+        ),
+        help="Allow binding non-loopback host without TLS (not recommended).",
+    )
     return parser.parse_args(argv)
 
 

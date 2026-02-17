@@ -247,6 +247,10 @@ def save_stream_state(path: Path, secret: bytes, counter: int, allow_plaintext: 
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(tmp, path)
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
         fsync_parent_directory(path)
     except OSError as e:
         raise ValueError(f"Unable to write stream state file '{path}': {e}") from e

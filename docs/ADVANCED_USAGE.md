@@ -142,6 +142,7 @@ For load-abuse resistance, keep per-client concurrency and request-rate controls
 - `USNPW_API_REQUEST_RATE_LIMIT`
 - `USNPW_API_REQUEST_RATE_WINDOW_SECONDS`
 - `USNPW_API_REQUEST_RATE_BLOCK_SECONDS`
+- `USNPW_API_MAX_RESPONSE_BYTES`
 
 ## API Hardening and Runtime Controls
 ### Endpoint Contract
@@ -153,6 +154,8 @@ For load-abuse resistance, keep per-client concurrency and request-rate controls
 - Bearer token auth is required for generation endpoints.
 - Prefer `USNPW_API_TOKEN_FILE` for secret injection.
 - `USNPW_API_TOKEN` and CLI token flags are opt-in and disabled by default.
+- API tokens must meet a minimum length requirement (`24` characters).
+- On POSIX, token files should use owner-only permissions (`chmod 600`).
 - Auth-failure throttling keys are composite and route-aware to resist token spray patterns.
 
 ### Request Envelope Policy
@@ -169,8 +172,9 @@ For load-abuse resistance, keep per-client concurrency and request-rate controls
 - Over-capacity worker saturation returns JSON `503`.
 
 ### Deployment Notes
-- Keep API deployment private unless you provide trusted TLS termination.
+- Non-loopback API binds require TLS by default.
 - For direct TLS in-process, set both `USNPW_API_TLS_CERT_FILE` and `USNPW_API_TLS_KEY_FILE`.
+- `USNPW_API_ALLOW_INSECURE_NO_TLS=true` is an explicit compatibility override and should stay disabled for production.
 - Treat access logs as sensitive metadata and keep them disabled unless needed.
 
 ## Troubleshooting

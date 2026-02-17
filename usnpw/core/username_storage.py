@@ -34,21 +34,23 @@ def fsync_parent_directory(path: Path) -> None:
 @contextmanager
 def _open_append_private(path: Path) -> Iterator[TextIO]:
     path.parent.mkdir(parents=True, exist_ok=True)
-    if os.name == "nt":
-        with path.open("a", encoding="utf-8", newline="\n") as handle:
-            yield handle
-        return
-
-    # Create with restrictive permissions on POSIX; prevents leaking persisted usernames/tokens.
     fd = os.open(str(path), os.O_APPEND | os.O_CREAT | os.O_WRONLY, 0o600)
-    try:
-        os.fchmod(fd, 0o600)
-    except OSError as exc:
+    if os.name != "nt":
+        # Create with restrictive permissions on POSIX; prevents leaking persisted usernames/tokens.
         try:
-            os.close(fd)
+            os.fchmod(fd, 0o600)
+        except OSError as exc:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+            raise ValueError(f"Unable to enforce private permissions on '{path}': {exc}") from exc
+    else:
+        # Best-effort private mode normalization on Windows; ACL behavior is OS-managed.
+        try:
+            os.chmod(path, 0o600)
         except OSError:
             pass
-        raise ValueError(f"Unable to enforce private permissions on '{path}': {exc}") from exc
     with os.fdopen(fd, "a", encoding="utf-8", newline="\n") as handle:
         yield handle
 

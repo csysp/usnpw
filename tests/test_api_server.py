@@ -158,6 +158,35 @@ class APIServerTests(unittest.TestCase):
         self.assertIn("effective_min_len", payload)
         self.assertIn("effective_max_len", payload)
 
+    def test_response_size_limit_returns_413(self) -> None:
+        config = APIConfig(
+            host="127.0.0.1",
+            port=0,
+            token=LONG_TEST_TOKEN,
+            max_body_bytes=1024,
+            max_password_count=20,
+            max_username_count=20,
+            max_response_bytes=128,
+        )
+        server = create_server(config)
+        port = int(server.server_address[1])
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            status, payload = self._request(
+                "POST",
+                "/v1/passwords",
+                payload={"count": 2, "length": 96, "format": "password"},
+                token=LONG_TEST_TOKEN,
+                port=port,
+            )
+            self.assertEqual(status, 413)
+            self.assertEqual(self._error_code(payload), "response_too_large")
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
     def test_invalid_json_returns_400(self) -> None:
         status, payload = self._request(
             "POST",
@@ -211,7 +240,7 @@ class APIServerTests(unittest.TestCase):
         config = APIConfig(
             host="127.0.0.1",
             port=0,
-            token="rate-token",
+            token=LONG_TEST_TOKEN,
             max_body_bytes=1024,
             max_password_count=20,
             max_username_count=20,
@@ -249,7 +278,7 @@ class APIServerTests(unittest.TestCase):
                 "POST",
                 "/v1/passwords",
                 payload={"count": 1},
-                token="rate-token",
+                token=LONG_TEST_TOKEN,
                 port=port,
             )
             self.assertEqual(status1, 401)
@@ -267,7 +296,7 @@ class APIServerTests(unittest.TestCase):
         config = APIConfig(
             host="127.0.0.1",
             port=0,
-            token="spray-token",
+            token=LONG_TEST_TOKEN,
             max_body_bytes=1024,
             max_password_count=20,
             max_username_count=20,
@@ -298,7 +327,7 @@ class APIServerTests(unittest.TestCase):
                 "POST",
                 "/v1/passwords",
                 payload={"count": 1},
-                token="spray-token",
+                token=LONG_TEST_TOKEN,
                 port=port,
             )
             self.assertEqual(status1, 401)
@@ -315,7 +344,7 @@ class APIServerTests(unittest.TestCase):
         config = APIConfig(
             host="127.0.0.1",
             port=0,
-            token="rate-token",
+            token=LONG_TEST_TOKEN,
             max_body_bytes=1024,
             max_password_count=20,
             max_username_count=20,
@@ -335,7 +364,7 @@ class APIServerTests(unittest.TestCase):
                 "POST",
                 "/v1/passwords",
                 payload={"count": 1, "length": 12, "format": "password"},
-                token="rate-token",
+                token=LONG_TEST_TOKEN,
                 port=port,
             )
             self.assertEqual(status1, 200)
@@ -355,7 +384,7 @@ class APIServerTests(unittest.TestCase):
         config = APIConfig(
             host="127.0.0.1",
             port=0,
-            token="concurrency-token",
+            token=LONG_TEST_TOKEN,
             max_body_bytes=1024,
             max_password_count=20,
             max_username_count=20,
@@ -391,7 +420,7 @@ class APIServerTests(unittest.TestCase):
                             "POST",
                             "/v1/passwords",
                             payload={"count": 1, "length": 12, "format": "password"},
-                            token="concurrency-token",
+                            token=LONG_TEST_TOKEN,
                             port=port,
                         )
                     )
@@ -439,6 +468,8 @@ class APIServerTests(unittest.TestCase):
         token_file = Path(".tmp_api_token_file.txt")
         try:
             token_file.write_text(f"{LONG_TEST_TOKEN}\n", encoding="utf-8")
+            if os.name != "nt":
+                token_file.chmod(0o600)
             args = argparse.Namespace(
                 host="127.0.0.1",
                 port=8080,
@@ -462,6 +493,39 @@ class APIServerTests(unittest.TestCase):
             )
             config = _build_config(args)
             self.assertEqual(config.token, LONG_TEST_TOKEN)
+        finally:
+            token_file.unlink(missing_ok=True)
+
+    def test_build_config_rejects_token_file_with_broad_permissions(self) -> None:
+        if os.name == "nt":
+            self.skipTest("POSIX-only token file permission check")
+        token_file = Path(".tmp_api_token_file_broad.txt")
+        try:
+            token_file.write_text(f"{LONG_TEST_TOKEN}\n", encoding="utf-8")
+            token_file.chmod(0o644)
+            args = argparse.Namespace(
+                host="127.0.0.1",
+                port=8080,
+                token="",
+                token_file=str(token_file),
+                max_body_bytes=1024,
+                max_password_count=10,
+                max_username_count=10,
+                max_concurrent_requests=32,
+                socket_timeout_seconds=5.0,
+                auth_fail_limit=5,
+                auth_fail_window_seconds=60,
+                auth_block_seconds=120,
+                request_rate_limit=240,
+                request_rate_window_seconds=10,
+                request_rate_block_seconds=30,
+                tls_cert_file="",
+                tls_key_file="",
+                allow_env_token=False,
+                allow_cli_token=False,
+            )
+            with self.assertRaisesRegex(ValueError, "permissions are too broad"):
+                _build_config(args)
         finally:
             token_file.unlink(missing_ok=True)
 
@@ -593,6 +657,61 @@ class APIServerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "max-concurrent-requests-per-client must be <= max-concurrent-requests"):
             _build_config(args)
 
+    def test_build_config_rejects_non_loopback_without_tls_by_default(self) -> None:
+        args = argparse.Namespace(
+            host="0.0.0.0",
+            port=8080,
+            token=LONG_TEST_TOKEN,
+            token_file="",
+            max_body_bytes=1024,
+            max_password_count=10,
+            max_username_count=10,
+            max_concurrent_requests=32,
+            max_concurrent_requests_per_client=8,
+            socket_timeout_seconds=5.0,
+            auth_fail_limit=5,
+            auth_fail_window_seconds=60,
+            auth_block_seconds=120,
+            request_rate_limit=240,
+            request_rate_window_seconds=10,
+            request_rate_block_seconds=30,
+            tls_cert_file="",
+            tls_key_file="",
+            allow_env_token=False,
+            allow_cli_token=True,
+            allow_insecure_no_tls=False,
+        )
+        with self.assertRaisesRegex(ValueError, "TLS is required when binding a non-loopback host"):
+            _build_config(args)
+
+    def test_build_config_allows_non_loopback_without_tls_only_with_explicit_opt_in(self) -> None:
+        args = argparse.Namespace(
+            host="0.0.0.0",
+            port=8080,
+            token=LONG_TEST_TOKEN,
+            token_file="",
+            max_body_bytes=1024,
+            max_password_count=10,
+            max_username_count=10,
+            max_concurrent_requests=32,
+            max_concurrent_requests_per_client=8,
+            socket_timeout_seconds=5.0,
+            auth_fail_limit=5,
+            auth_fail_window_seconds=60,
+            auth_block_seconds=120,
+            request_rate_limit=240,
+            request_rate_window_seconds=10,
+            request_rate_block_seconds=30,
+            tls_cert_file="",
+            tls_key_file="",
+            allow_env_token=False,
+            allow_cli_token=True,
+            allow_insecure_no_tls=True,
+        )
+        config = _build_config(args)
+        self.assertEqual(config.host, "0.0.0.0")
+        self.assertTrue(config.allow_insecure_no_tls)
+
     def test_build_config_rejects_short_cli_token_even_with_opt_in(self) -> None:
         args = argparse.Namespace(
             host="127.0.0.1",
@@ -618,6 +737,18 @@ class APIServerTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "token must be at least"):
             _build_config(args)
+
+    def test_create_server_rejects_short_token_when_config_is_constructed_directly(self) -> None:
+        config = APIConfig(
+            host="127.0.0.1",
+            port=0,
+            token=SHORT_TEST_TOKEN,
+            max_body_bytes=1024,
+            max_password_count=10,
+            max_username_count=10,
+        )
+        with self.assertRaisesRegex(ValueError, "token must be at least"):
+            create_server(config)
 
     def test_internal_error_returns_json_500(self) -> None:
         with patch("usnpw.api.server.generate_passwords", side_effect=RuntimeError("boom")):
