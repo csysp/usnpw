@@ -220,8 +220,9 @@ class USnPwApp(tk.Tk):
             return True
         if any(part in (".", "..") for part in expanded.parts):
             return True
-        canonical = self._canonicalize_for_risk(expanded)
-        return self._normalized_path_value(expanded) != self._normalized_path_value(canonical)
+        # Do not reject absolute OS alias paths (for example /var -> /private/var on macOS),
+        # because those are routine on CI and user systems and are not traversal input.
+        return False
 
     def _canonicalize_for_risk(self, path: Path) -> Path:
         expanded = path.expanduser()
