@@ -1,14 +1,28 @@
 from __future__ import annotations
 
 import os
+import stat
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterable, Iterator, Set, TextIO
+
+MAX_LINESET_FILE_BYTES = 64 * 1024 * 1024
 
 
 def load_lineset(path: Path, label: str) -> Set[str]:
     if not path.exists():
         return set()
+    try:
+        st = path.stat()
+    except OSError as e:
+        raise ValueError(f"Unable to stat {label} file '{path}': {e}") from e
+    if not stat.S_ISREG(st.st_mode):
+        raise ValueError(f"{label} path is not a regular file: {path}")
+    if st.st_size > MAX_LINESET_FILE_BYTES:
+        raise ValueError(
+            f"{label} file is too large: {path} "
+            f"(max {MAX_LINESET_FILE_BYTES} bytes)"
+        )
     try:
         return {line.strip() for line in path.read_text(encoding="utf-8").splitlines() if line.strip()}
     except (OSError, UnicodeError) as e:
@@ -76,6 +90,7 @@ def append_lines(path: Path, lines: Iterable[str]) -> None:
 
 
 __all__ = [
+    "MAX_LINESET_FILE_BYTES",
     "load_lineset",
     "fsync_parent_directory",
     "append_line",

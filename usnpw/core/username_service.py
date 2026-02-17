@@ -212,12 +212,12 @@ def generate_usernames(request: UsernameRequest) -> UsernameResult:
                     "count exceeds token-block theoretical capacity for this run: "
                     f"requested={request.count}, theoretical_max={token_cap}. "
                     "Token blocking requires fresh component tokens per username, and the "
-                    "current scheme quota + pool sizes cannot satisfy a larger batch. "
+                    "current available token pools cannot satisfy a larger batch. "
                     f"Available pools after token filtering: adj={len(pools.adjectives)}, "
                     f"noun={len(pools.nouns)}, verb={len(pools.verbs)}, pseudo={len(pools.pseudos)}. "
                     f"Practical stable target is often lower; try count <= {suggested}. "
                     "Use a smaller count, rotate or clear token_blacklist, increase "
-                    "max_scheme_pct, or disable token blocking."
+                    "pool_scale, or disable token blocking."
                 )
 
         records: list[UsernameRecord] = []

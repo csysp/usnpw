@@ -116,6 +116,50 @@ class CoreSmokeTests(unittest.TestCase):
         self.assertEqual(state.recent_seps[-1], sep_used)
         self.assertEqual(state.recent_case_styles[-1], case_style_used)
 
+    def test_stream_generation_accepts_large_counter_values(self) -> None:
+        stream_key = b"\x02" * 32
+        base36 = "0123456789abcdefghijklmnopqrstuvwxyz"
+        tag_map = {ch: ch for ch in base36}
+        start_counter = 1 << 64
+
+        policy = PLATFORM_POLICIES["reddit"]
+        pools = username_lexicon.RunPools(
+            adjectives=["able", "brisk", "clean"],
+            nouns=["node", "token", "buffer"],
+            verbs=["build", "trace", "encode"],
+            pseudos=["keko", "mavu", "nori"],
+            tags=["xx", "yy", "zz"],
+        )
+        schemes = [username_schemes.Scheme("adj_noun", 1.0, username_schemes.scheme_adj_noun)]
+        state = username_schemes.GenState(
+            recent_schemes=[],
+            recent_seps=[],
+            recent_case_styles=[],
+            scheme_counts={},
+            total_target=1,
+            max_scheme_pct=1.0,
+        )
+
+        username, _, _, _, _, stream_counter = username_generation.generate_stream_unique(
+            stream_key=stream_key,
+            stream_tag_map=tag_map,
+            stream_counter=start_counter,
+            token_blacklist=set(),
+            max_len=32,
+            min_len=policy.min_len,
+            policy=policy,
+            disallow_prefixes=tuple(),
+            disallow_substrings=tuple(),
+            state=state,
+            schemes=schemes,
+            pools=pools,
+            history_n=10,
+            block_tokens=False,
+            attempts=50,
+        )
+        self.assertTrue(username)
+        self.assertGreater(stream_counter, start_counter)
+
     def test_core_package_import_is_lightweight(self) -> None:
         probe = (
             "import sys; import usnpw.core; "
@@ -144,6 +188,20 @@ class CoreSmokeTests(unittest.TestCase):
         finally:
             try:
                 path.unlink()
+            except OSError:
+                pass
+
+    def test_load_stream_state_rejects_oversize_file(self) -> None:
+        suffix = f"{os.getpid()}_{time.time_ns()}"
+        state_path = Path(f".tmp_stream_state_oversize_{suffix}.json")
+        try:
+            with state_path.open("wb") as handle:
+                handle.truncate(username_stream_state.MAX_STREAM_STATE_FILE_BYTES + 1)
+            with self.assertRaisesRegex(ValueError, "Stream state file too large"):
+                username_stream_state.load_or_init_stream_state(state_path, allow_plaintext=True)
+        finally:
+            try:
+                state_path.unlink()
             except OSError:
                 pass
 
@@ -192,6 +250,20 @@ class CoreSmokeTests(unittest.TestCase):
             username_generation.normalize_for_platform("A!B.C__D-", policy=policy, max_len=32),
             "abc_d",
         )
+
+    def test_token_cap_math_uses_soft_quota_upper_bound(self) -> None:
+        pools = username_lexicon.RunPools(
+            adjectives=["a0", "a1", "a2", "a3"],
+            nouns=["n0", "n1", "n2"],
+            verbs=["v0", "v1", "v2", "v3", "v4"],
+            pseudos=[f"p{i}" for i in range(12)],
+            tags=[f"t{i}" for i in range(12)],
+        )
+        schemes = [s for s in username_schemes.DEFAULT_SCHEMES if s.name != "initials_style"]
+        cap_low = username_schemes.max_token_block_count(pools, schemes, max_scheme_pct=0.10)
+        cap_high = username_schemes.max_token_block_count(pools, schemes, max_scheme_pct=0.80)
+        self.assertEqual(cap_low, cap_high)
+        self.assertGreaterEqual(cap_low, 12)
 
 
 if __name__ == "__main__":

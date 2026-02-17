@@ -11,6 +11,13 @@ from usnpw.core import username_uniqueness as uniqueness
 from usnpw.core.username_policies import PlatformPolicy
 
 
+def _encode_counter_bytes(counter: int) -> bytes:
+    if counter < 0:
+        raise ValueError("stream counter must be non-negative")
+    width = max(1, (counter.bit_length() + 7) // 8)
+    return counter.to_bytes(width, "big")
+
+
 def normalize_for_platform(u: str, policy: PlatformPolicy, max_len: int) -> str:
     if policy.lowercase:
         u = u.lower()
@@ -115,6 +122,9 @@ def generate_stream_unique(
     block_tokens: bool,
     attempts: int = 2000,
 ) -> Tuple[str, str, str, str, Set[str], int]:
+    if stream_counter < 0:
+        raise ValueError("stream counter must be non-negative")
+
     if policy.case_insensitive:
         prefixes = tuple(p.lower() for p in disallow_prefixes if p)
         subs = tuple(s.lower() for s in disallow_substrings if s)
@@ -140,7 +150,7 @@ def generate_stream_unique(
             push_state=False,
         )
 
-        counter_bytes = stream_counter.to_bytes(8, "big")
+        counter_bytes = _encode_counter_bytes(stream_counter)
         layout_digest = hmac.new(stream_key, b"layout:" + counter_bytes, hashlib.sha256).digest()
         tag = stream_state.stream_tag(stream_tag_map, stream_counter, scramble_key=stream_key)
         stream_counter += 1

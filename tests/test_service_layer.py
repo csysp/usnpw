@@ -6,9 +6,11 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from usnpw.core import username_storage
 from usnpw.core.models import PasswordRequest, UsernameRequest
 from usnpw.core.password_service import generate_passwords
 from usnpw.core.username_service import apply_safe_mode_overrides, generate_usernames
+from usnpw.core.username_lexicon import RunPools
 
 
 class ServiceLayerTests(unittest.TestCase):
@@ -46,6 +48,86 @@ class ServiceLayerTests(unittest.TestCase):
     def test_username_service_count_validation(self) -> None:
         with self.assertRaisesRegex(ValueError, "count must be > 0"):
             generate_usernames(UsernameRequest(count=0))
+
+    def test_username_service_rejects_oversize_blacklist_file(self) -> None:
+        suffix = f"{os.getpid()}_{time.time_ns()}"
+        blacklist_path = Path(f".tmp_names_oversize_{suffix}.txt")
+        try:
+            with blacklist_path.open("wb") as handle:
+                handle.truncate(username_storage.MAX_LINESET_FILE_BYTES + 1)
+            request = UsernameRequest(
+                count=1,
+                min_len=5,
+                max_len=12,
+                profile="reddit",
+                uniqueness_mode="blacklist",
+                blacklist=str(blacklist_path),
+                no_save=True,
+                no_token_save=True,
+                no_token_block=True,
+            )
+            with self.assertRaisesRegex(ValueError, "username blacklist file is too large"):
+                generate_usernames(request)
+        finally:
+            try:
+                blacklist_path.unlink()
+            except OSError:
+                pass
+
+    def test_username_service_token_cap_does_not_hard_fail_on_soft_scheme_pct(self) -> None:
+        pools = RunPools(
+            adjectives=["a0", "a1", "a2", "a3"],
+            nouns=["n0", "n1", "n2"],
+            verbs=["v0", "v1", "v2", "v3", "v4"],
+            pseudos=[f"pseudo{i}" for i in range(20)],
+            tags=[f"tag{i}" for i in range(20)],
+        )
+        request = UsernameRequest(
+            count=8,
+            min_len=5,
+            max_len=20,
+            profile="reddit",
+            uniqueness_mode="blacklist",
+            no_save=True,
+            no_token_save=True,
+            no_token_block=False,
+            max_scheme_pct=0.10,
+        )
+
+        def _fake_generate_unique(  # type: ignore[no-untyped-def]
+            username_blacklist_keys,
+            token_blacklist,
+            max_len,
+            min_len,
+            policy,
+            disallow_prefixes,
+            disallow_substrings,
+            state,
+            schemes,
+            pools,
+            history_n,
+            block_tokens,
+            attempts=80_000,
+            push_state=True,
+        ):
+            del username_blacklist_keys, policy, disallow_prefixes, disallow_substrings, state, schemes, history_n, attempts
+            del push_state, block_tokens
+            for token in pools.pseudos:
+                if token in token_blacklist:
+                    continue
+                username = token[:max_len]
+                if len(username) < min_len:
+                    continue
+                return username, "pseudoword_pair", "", "lower", {token}
+            raise RuntimeError("exhausted")
+
+        with (
+            patch("usnpw.core.username_service.username_lexicon.build_run_pools", return_value=pools),
+            patch("usnpw.core.username_service.username_generation.generate_unique", side_effect=_fake_generate_unique),
+        ):
+            result = generate_usernames(request)
+
+        self.assertEqual(len(result.records), 8)
 
     def test_username_service_generates_records(self) -> None:
         request = UsernameRequest(

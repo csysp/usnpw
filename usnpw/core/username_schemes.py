@@ -4,7 +4,6 @@ import math
 import secrets
 import string
 from dataclasses import dataclass
-from functools import lru_cache
 from typing import Callable, Dict, List, Optional, Set, Tuple
 
 from usnpw.core.username_lexicon import RunPools, normalize_token
@@ -289,9 +288,15 @@ def max_token_block_count(
     max_scheme_pct: float,
 ) -> Optional[int]:
     """
-    Compute maximum feasible --count under token blocking for known schemes.
+    Compute an upper bound for feasible --count under token blocking for known schemes.
+
+    Runtime scheme selection treats max_scheme_pct as a soft preference and will fallback
+    to any scheme once every scheme has reached the preference cap. This helper therefore
+    models pool/token limits under that soft behavior instead of hard per-scheme caps.
+
     Returns None if unknown scheme names are present.
     """
+    del max_scheme_pct
     enabled = {s.name for s in schemes}
     if any(name not in SCHEME_TOKEN_COSTS for name in enabled):
         return None
@@ -301,68 +306,39 @@ def max_token_block_count(
     v_total = len(pools.verbs)
     p_total = len(pools.pseudos)
 
-    no_cap_upper = 0
-    if "adj_noun" in enabled:
-        no_cap_upper += min(a_total, n_total)
-    if "verb_noun_tag" in enabled:
-        no_cap_upper += min(v_total, n_total)
-    if "pseudoword_pair" in enabled:
-        no_cap_upper += p_total
-    if "compound_3" in enabled:
-        no_cap_upper += min(a_total, n_total // 2)
-    if "initials_style" in enabled:
-        no_cap_upper += min(a_total, n_total)
+    has_adj_like = ("adj_noun" in enabled) or ("initials_style" in enabled)
+    has_verb_noun = "verb_noun_tag" in enabled
+    has_compound = "compound_3" in enabled
+    has_pseudoword = "pseudoword_pair" in enabled
 
-    if no_cap_upper <= 0:
+    if not (has_adj_like or has_verb_noun or has_compound or has_pseudoword):
         return 0
 
-    @lru_cache(maxsize=None)
-    def feasible(target: int) -> bool:
-        if target <= 0:
-            return True
+    pseudo_bonus = p_total if has_pseudoword else 0
+    max_compound = min(a_total, n_total // 2) if has_compound else 0
 
-        cap = scheme_cap(max_scheme_pct, target)
+    best = 0
+    for x_compound in range(max_compound, -1, -1):
+        rem_adj = a_total - x_compound
+        rem_noun = n_total - (2 * x_compound)
+        if rem_adj < 0 or rem_noun < 0:
+            continue
 
-        u_adj = min(cap, a_total, n_total) if "adj_noun" in enabled else 0
-        u_verb = min(cap, v_total, n_total) if "verb_noun_tag" in enabled else 0
-        u_pseudo = min(cap, p_total) if "pseudoword_pair" in enabled else 0
-        u_compound = min(cap, a_total, n_total // 2) if "compound_3" in enabled else 0
-        u_initials = min(cap, a_total, n_total) if "initials_style" in enabled else 0
+        max_verb = min(v_total, rem_noun) if has_verb_noun else 0
 
-        if target > (u_adj + u_verb + u_pseudo + u_compound + u_initials):
-            return False
-
-        # Loop over the two schemes that have unique noun pressure.
-        for x_compound in range(u_compound, -1, -1):
-            rem_adj = a_total - x_compound
-            rem_noun = n_total - (2 * x_compound)
-            if rem_adj < 0 or rem_noun < 0:
-                continue
-
-            u_verb_here = min(u_verb, rem_noun)
-            for x_verb in range(u_verb_here, -1, -1):
-                rem_noun2 = rem_noun - x_verb
-                if rem_noun2 < 0:
-                    continue
-
-                # x_adj + x_initials share identical (adj=1, noun=1) costs.
-                y_max = min(rem_adj, rem_noun2, u_adj + u_initials)
-                y_min = max(0, target - x_compound - x_verb - u_pseudo)
-                y_hi = min(y_max, target - x_compound - x_verb)
-
-                if y_min <= y_hi:
-                    return True
-
-        return False
-
-    lo, hi = 0, no_cap_upper
-    while lo < hi:
-        mid = (lo + hi + 1) // 2
-        if feasible(mid):
-            lo = mid
+        # Combined best contribution from (verb_noun_tag) and adj-like schemes.
+        # `x_verb + min(rem_adj, rem_noun - x_verb)` is maximized by:
+        # min(rem_noun, rem_adj + max_verb)
+        if has_adj_like:
+            combined = min(rem_noun, rem_adj + max_verb)
         else:
-            hi = mid - 1
-    return lo
+            combined = max_verb
+
+        total = x_compound + combined + pseudo_bonus
+        if total > best:
+            best = total
+
+    return best
 
 
 __all__ = [

@@ -7,6 +7,7 @@ import json
 import math
 import os
 import secrets
+import stat
 import time
 from dataclasses import dataclass
 from functools import lru_cache
@@ -22,6 +23,7 @@ _STREAM_LOCK_POLL_SEC = 0.1
 _STREAM_LOCK_STALE_SEC = 600.0
 _STREAM_DPAPI_ENTROPY = b"UsnPw.opsec_username_gen.stream.v2"
 _BASE36 = "0123456789abcdefghijklmnopqrstuvwxyz"
+MAX_STREAM_STATE_FILE_BYTES = 256 * 1024
 
 
 @dataclass
@@ -140,6 +142,18 @@ def load_or_init_stream_state(path: Path, allow_plaintext: bool = False) -> Tupl
         counter = 0
         save_stream_state(path, secret, counter, allow_plaintext=allow_plaintext)
         return secret, counter
+
+    try:
+        st = path.stat()
+    except OSError as e:
+        raise ValueError(f"Unable to stat stream state file '{path}': {e}") from e
+    if not stat.S_ISREG(st.st_mode):
+        raise ValueError(f"Invalid stream state path '{path}' (expected regular file).")
+    if st.st_size > MAX_STREAM_STATE_FILE_BYTES:
+        raise ValueError(
+            f"Stream state file too large: '{path}' "
+            f"(max {MAX_STREAM_STATE_FILE_BYTES} bytes)."
+        )
 
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
@@ -317,6 +331,7 @@ def stream_tag(tag_map: Dict[str, str], counter: int, scramble_key: Optional[byt
 
 
 __all__ = [
+    "MAX_STREAM_STATE_FILE_BYTES",
     "StreamStateLock",
     "acquire_stream_state_lock",
     "release_stream_state_lock",
