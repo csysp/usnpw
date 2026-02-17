@@ -6,6 +6,16 @@ The project pairs hardened defaults with practical usability: a unified CLI, a t
 ## Safety Notice
 Do not use this project for illegal activity. You are responsible for your own use.
 
+## OPSEC Boundaries
+USnPw is built for privacy-hardened credential generation, not anonymity or endpoint compromise defense.
+
+1. If the host is compromised, generated data can be exposed.
+2. API mode should remain private-network by default; internet exposure requires layered controls.
+3. Clipboard, exports, and persistence paths create recoverable local artifacts.
+4. The tool supports minimization and hardening, but legal/compliance responsibility stays with operators.
+
+See `THREAT_MODEL.md` for the full LINDDUN-informed threat model and control mapping.
+
 ## Install and Setup
 Use `docs/SETUP.md` for complete setup instructions across Windows, Linux, and macOS.
 

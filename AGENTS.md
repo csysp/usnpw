@@ -11,6 +11,9 @@ Password generation includes randomness from `os.urandom` and supports formats/e
 Build a small, auditable FOSS CLI for high-privacy username and secret generation.
 Prioritize OPSEC and anti-fingerprinting over everything else.
 
+## Core Directive (Seed Phrase)
+Auditable credential generation for sensitive workflows.
+
 ## Non-Negotiables
 - Keep dependencies to Python stdlib unless explicitly approved, even then vet each lib choice from a cybersecurity POV.
 - No silent security/privacy failures.
