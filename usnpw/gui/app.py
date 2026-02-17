@@ -818,11 +818,18 @@ class USnPwApp(tk.Tk):
                 self._events.put(("ok", (on_ok, result)))
             except (ValueError, OSError, UnicodeError, RuntimeError) as exc:
                 self._events.put(("err", (exc, "")))
-            except Exception:
+            except Exception as exc:
                 context = make_error("internal_error", "unexpected background task failure")
                 self._events.put(("err", (context, traceback.format_exc())))
+                raise RuntimeError(str(context)) from exc
 
-        threading.Thread(target=worker, daemon=True).start()
+        def worker_guarded() -> None:
+            try:
+                worker()
+            except RuntimeError:
+                return
+
+        threading.Thread(target=worker_guarded, daemon=True).start()
 
     def _poll_events(self) -> None:
         try:
