@@ -35,7 +35,7 @@ Choose controls that fit the actual threat actor and workflow reality; avoid bot
 | Validate and iterate | Preflight, fuzzing, pentest scripts, release gates, signature verification | `tools/release.py preflight`, `tools/security_audit.py`, CI workflows |
 | Align with governance/compliance | Non-compliance explicitly modeled; legal/regulatory accountability remains operator responsibility | OPSEC/compliance boundaries, Non-compliance mapping, release signing docs |
 
-## Policy Gates (AGENTS.md Realignment)
+## Policy Gates 
 These gates are non-optional and directly mapped to framework expectations:
 
 1. No silent failure:
