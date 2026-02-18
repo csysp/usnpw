@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - "v*"
+      - "[0-9]*"
   workflow_dispatch:
 
 permissions:
@@ -161,7 +162,7 @@ jobs:
       - binaries
       - sign
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.ref_type == 'tag'
     permissions:
       contents: write
     steps:
