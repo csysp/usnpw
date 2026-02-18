@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-from typing import Dict, List, Set, Tuple
+from typing import Callable, Dict, List, Set, Tuple
 
 from usnpw.core import username_lexicon as lexicon
 from usnpw.core import username_schemes as schemes_mod
@@ -56,6 +56,7 @@ def generate_unique(
     attempts: int = 80_000,
     *,
     push_state: bool = True,
+    username_key_hasher: Callable[[str], str] | None = None,
 ) -> Tuple[str, str, str, str, Set[str]]:
     if policy.case_insensitive:
         prefixes = tuple(p.lower() for p in disallow_prefixes if p)
@@ -82,6 +83,8 @@ def generate_unique(
             continue
         u_key = normalize_username_key(u, case_insensitive=policy.case_insensitive)
         if u_key in username_blacklist_keys:
+            continue
+        if username_key_hasher is not None and username_key_hasher(u_key) in username_blacklist_keys:
             continue
 
         # Block reusable component tokens (optional, but recommended)

@@ -107,11 +107,12 @@ class ServiceLayerTests(unittest.TestCase):
             pools,
             history_n,
             block_tokens,
+            username_key_hasher=None,
             attempts=80_000,
             push_state=True,
         ):
             del username_blacklist_keys, policy, disallow_prefixes, disallow_substrings, state, schemes, history_n, attempts
-            del push_state, block_tokens
+            del push_state, block_tokens, username_key_hasher
             for token in pools.pseudos:
                 if token in token_blacklist:
                     continue
@@ -332,6 +333,127 @@ class ServiceLayerTests(unittest.TestCase):
             for path in (
                 blacklist_path,
                 token_path,
+                blacklist_path.with_name(blacklist_path.name + ".lock"),
+                token_path.with_name(token_path.name + ".lock"),
+            ):
+                try:
+                    path.unlink()
+                except OSError:
+                    pass
+
+    def test_blacklist_mode_save_persists_hashed_usernames(self) -> None:
+        suffix = f"{os.getpid()}_{time.time_ns()}"
+        blacklist_path = Path(f".tmp_names_hashed_{suffix}.txt")
+        token_path = Path(f".tmp_tokens_hashed_{suffix}.txt")
+        key_path = username_storage.username_hash_key_path(blacklist_path)
+        try:
+            request = UsernameRequest(
+                count=4,
+                min_len=5,
+                max_len=12,
+                profile="reddit",
+                uniqueness_mode="blacklist",
+                blacklist=str(blacklist_path),
+                token_blacklist=str(token_path),
+                no_save=False,
+                no_token_save=True,
+                no_token_block=True,
+            )
+            result = generate_usernames(request)
+            self.assertEqual(len(result.records), 4)
+            self.assertTrue(key_path.exists())
+
+            entries = username_storage.load_lineset(blacklist_path, "username blacklist")
+            self.assertEqual(len(entries), 4)
+            for entry in entries:
+                self.assertTrue(entry.startswith(username_storage.USERNAME_HASH_PREFIX))
+                self.assertIsNotNone(username_storage.parse_hashed_username_entry(entry))
+        finally:
+            for path in (
+                blacklist_path,
+                token_path,
+                key_path,
+                blacklist_path.with_name(blacklist_path.name + ".lock"),
+                token_path.with_name(token_path.name + ".lock"),
+            ):
+                try:
+                    path.unlink()
+                except OSError:
+                    pass
+
+    def test_blacklist_mode_hashed_entries_require_key_file(self) -> None:
+        suffix = f"{os.getpid()}_{time.time_ns()}"
+        blacklist_path = Path(f".tmp_names_missing_key_{suffix}.txt")
+        token_path = Path(f".tmp_tokens_missing_key_{suffix}.txt")
+        try:
+            blacklist_path.write_text(
+                username_storage.USERNAME_HASH_PREFIX + ("0" * 64) + "\n",
+                encoding="utf-8",
+            )
+            request = UsernameRequest(
+                count=1,
+                min_len=5,
+                max_len=12,
+                profile="reddit",
+                uniqueness_mode="blacklist",
+                blacklist=str(blacklist_path),
+                token_blacklist=str(token_path),
+                no_save=True,
+                no_token_save=True,
+                no_token_block=True,
+            )
+            with self.assertRaisesRegex(ValueError, "hash key is available"):
+                generate_usernames(request)
+        finally:
+            for path in (
+                blacklist_path,
+                token_path,
+                username_storage.username_hash_key_path(blacklist_path),
+                blacklist_path.with_name(blacklist_path.name + ".lock"),
+                token_path.with_name(token_path.name + ".lock"),
+            ):
+                try:
+                    path.unlink()
+                except OSError:
+                    pass
+
+    def test_blacklist_mode_save_migrates_legacy_raw_entries(self) -> None:
+        suffix = f"{os.getpid()}_{time.time_ns()}"
+        blacklist_path = Path(f".tmp_names_migrate_{suffix}.txt")
+        token_path = Path(f".tmp_tokens_migrate_{suffix}.txt")
+        key_path = username_storage.username_hash_key_path(blacklist_path)
+        try:
+            username_storage.load_username_hash_key(blacklist_path, create_if_missing=True)
+            blacklist_path.write_text("AlphaUser\nBetaUser\n", encoding="utf-8")
+
+            request = UsernameRequest(
+                count=2,
+                min_len=5,
+                max_len=12,
+                profile="reddit",
+                uniqueness_mode="blacklist",
+                blacklist=str(blacklist_path),
+                token_blacklist=str(token_path),
+                no_save=False,
+                no_token_save=True,
+                no_token_block=True,
+            )
+            result = generate_usernames(request)
+            self.assertEqual(len(result.records), 2)
+
+            entries = username_storage.load_lineset(blacklist_path, "username blacklist")
+            self.assertGreaterEqual(len(entries), 2)
+            self.assertNotIn("alphauser", entries)
+            self.assertNotIn("betauser", entries)
+            for entry in entries:
+                self.assertTrue(entry.startswith(username_storage.USERNAME_HASH_PREFIX))
+                self.assertIsNotNone(username_storage.parse_hashed_username_entry(entry))
+            self.assertTrue(key_path.exists())
+        finally:
+            for path in (
+                blacklist_path,
+                token_path,
+                key_path,
                 blacklist_path.with_name(blacklist_path.name + ".lock"),
                 token_path.with_name(token_path.name + ".lock"),
             ):

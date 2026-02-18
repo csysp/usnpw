@@ -67,6 +67,10 @@ class USnPwApp(tk.Tk):
         self._apply_theme(dark=self.dark_mode.get())
         self.after(100, self._poll_events)
 
+    @staticmethod
+    def _env_flag_enabled(name: str) -> bool:
+        return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
+
     def _build_ui(self) -> None:
         root = ttk.Frame(self, padding=10)
         root.pack(fill=tk.BOTH, expand=True)
@@ -489,18 +493,22 @@ class USnPwApp(tk.Tk):
         row4 = ttk.Frame(panel)
         row4.pack(fill=tk.X, anchor="w", pady=(6, 0))
 
-        self.strict_opsec_lock = tk.BooleanVar(value=False)
+        # Threat model: team deployments may opt in to a hardened UI baseline
+        # without forcing that posture for all local users by default.
+        team_hardened = self._env_flag_enabled("USNPW_TEAM_HARDENED_DEFAULTS")
+
+        self.strict_opsec_lock = tk.BooleanVar(value=team_hardened)
         self.session_only_mode = tk.BooleanVar(value=False)
-        self.copy_guard = tk.BooleanVar(value=False)
+        self.copy_guard = tk.BooleanVar(value=team_hardened)
         self.unsafe_path_block = tk.BooleanVar(value=True)
         self.shoulder_surf_mask = tk.BooleanVar(value=False)
         self.auto_clear_clipboard = tk.BooleanVar(value=True)
         self.clipboard_ttl_seconds = tk.StringVar(value="30")
-        self.output_auto_clear = tk.BooleanVar(value=False)
-        self.output_ttl_seconds = tk.StringVar(value="30")
+        self.output_auto_clear = tk.BooleanVar(value=team_hardened)
+        self.output_ttl_seconds = tk.StringVar(value="20" if team_hardened else "30")
         self.encrypt_exports = tk.BooleanVar(value=False)
         self.export_passphrase = tk.StringVar(value="")
-        self.windows_acl_hardening = tk.BooleanVar(value=False)
+        self.windows_acl_hardening = tk.BooleanVar(value=team_hardened and os.name == "nt")
 
         ttk.Checkbutton(
             row1, text="Strict OPSEC lock", variable=self.strict_opsec_lock, command=self._on_strict_opsec_toggled
@@ -885,6 +893,8 @@ class USnPwApp(tk.Tk):
             except (ValueError, OSError, UnicodeError) as exc:
                 self._events.put(("err", (exc, "")))
             except Exception as exc:
+                # Security policy: unexpected GUI-boundary failures are converted into an
+                # explicit internal error context so we never fail silently.
                 context = make_error("internal_error", "unexpected background task failure")
                 self._events.put(("err", (context, traceback.format_exc())))
                 raise RuntimeError(str(context)) from exc

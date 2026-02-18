@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: release-artifacts-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   source:
     name: Source Bundle
@@ -238,7 +242,13 @@ jobs:
               throw error;
             }
 
-            for (const asset of release.assets) {
+            const assets = await github.paginate(github.rest.repos.listReleaseAssets, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: release.id,
+              per_page: 100,
+            });
+            for (const asset of assets) {
               if (!asset.name.startsWith("usnpw")) {
                 continue;
               }

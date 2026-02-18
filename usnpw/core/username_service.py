@@ -78,16 +78,39 @@ def _load_username_blacklist(
     *,
     enabled: bool,
     case_insensitive: bool,
-) -> set[str]:
+    hash_key: bytes | None,
+) -> tuple[set[str], tuple[str, ...] | None, bool]:
     if not enabled:
-        return set()
+        return set(), None, False
 
     username_blacklist: set[str] = set()
+    hashed_entries: set[str] | None = set() if hash_key is not None else None
+    saw_legacy_raw_entries = False
     for username in username_storage.load_lineset(bl_path, "username blacklist"):
+        hashed_entry = username_storage.parse_hashed_username_entry(username)
+        if hashed_entry is not None:
+            if hash_key is None:
+                raise ValueError(
+                    "username blacklist contains hashed entries but no hash key is available. "
+                    f"Expected key file: {username_storage.username_hash_key_path(bl_path)}"
+                )
+            username_blacklist.add(hashed_entry)
+            if hashed_entries is not None:
+                hashed_entries.add(hashed_entry)
+            continue
         key = username_generation.normalize_username_key(username, case_insensitive=case_insensitive)
         if key:
-            username_blacklist.add(key)
-    return username_blacklist
+            if hash_key is None:
+                username_blacklist.add(key)
+                continue
+            saw_legacy_raw_entries = True
+            hashed_key = username_storage.hash_username_key(key, hash_key)
+            username_blacklist.add(hashed_key)
+            if hashed_entries is not None:
+                hashed_entries.add(hashed_key)
+    if hashed_entries is None:
+        return username_blacklist, None, False
+    return username_blacklist, tuple(sorted(hashed_entries)), saw_legacy_raw_entries
 
 
 def _load_token_blacklist(token_path: Path, *, enabled: bool) -> set[str]:
@@ -165,13 +188,38 @@ def generate_usernames(request: UsernameRequest) -> UsernameResult:
             except (OSError, ValueError) as exc:
                 raise ValueError(f"Unable to acquire token blacklist lock '{token_path}': {exc}") from exc
 
-        username_blacklist = _load_username_blacklist(
+        username_hash_key: bytes | None = None
+        if request.uniqueness_mode == "blacklist":
+            username_hash_key = username_storage.load_username_hash_key(
+                bl_path,
+                create_if_missing=not request.no_save,
+                strict_windows_acl=request.strict_windows_acl,
+            )
+
+        username_blacklist, persisted_hashed_entries, saw_legacy_raw_entries = _load_username_blacklist(
             bl_path,
             enabled=request.uniqueness_mode == "blacklist",
             case_insensitive=policy.case_insensitive,
+            hash_key=username_hash_key,
         )
+        if (
+            request.uniqueness_mode == "blacklist"
+            and not request.no_save
+            and saw_legacy_raw_entries
+            and persisted_hashed_entries is not None
+        ):
+            # Migration note: once a hash key exists, rewrite legacy raw entries to hashed
+            # entries under the same blacklist lock, so persisted identifiers are minimized.
+            username_storage.replace_lines(
+                bl_path,
+                persisted_hashed_entries,
+                strict_windows_acl=request.strict_windows_acl,
+            )
         token_blacklist = _load_token_blacklist(token_path, enabled=not request.no_token_block)
         schemes = _build_schemes(request.initials_weight)
+        username_key_hasher = None
+        if username_hash_key is not None:
+            username_key_hasher = lambda key: username_storage.hash_username_key(key, username_hash_key)
 
         try:
             pools = username_lexicon.build_run_pools(
@@ -339,6 +387,7 @@ def generate_usernames(request: UsernameRequest) -> UsernameResult:
                             pools=pools,
                             history_n=history_n,
                             block_tokens=block_tokens,
+                            username_key_hasher=username_key_hasher,
                         )
                     except RuntimeError as exc:
                         raise _generation_error(
@@ -361,9 +410,15 @@ def generate_usernames(request: UsernameRequest) -> UsernameResult:
                         username,
                         case_insensitive=policy.case_insensitive,
                     )
-                    username_blacklist.add(username_key)
+                    if username_key_hasher is not None:
+                        username_blacklist.add(username_key_hasher(username_key))
+                    else:
+                        username_blacklist.add(username_key)
                     if not request.no_save:
-                        usernames_to_save.append(username_key)
+                        if username_key_hasher is not None:
+                            usernames_to_save.append(username_key_hasher(username_key))
+                        else:
+                            usernames_to_save.append(username_key)
                     if block_tokens and used_tokens:
                         tokens_to_save |= used_tokens
                         token_blacklist |= used_tokens

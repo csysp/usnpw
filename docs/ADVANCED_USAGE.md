@@ -72,6 +72,7 @@ Remove-Item "$env:USERPROFILE\.u_tokens_reddit.txt" -Force -ErrorAction Silently
 
 ### Persistence Tradeoffs
 `--no-save` and `--no-token-save` remain the hardened defaults. Enable persistence only when your operational model requires cross-run continuity, and scope files per persona and profile.
+When username persistence is enabled in blacklist mode, saved username entries are HMAC-hashed (`h1:<digest>`) rather than stored as raw identifiers. The per-blacklist key is stored locally at `<blacklist>.key` with private file permissions. If a key exists and legacy raw entries are present, they are migrated to hashed entries on the next persisted run.
 
 ### Content Constraints
 Use explicit prefix and substring blocks when operational policy requires it.
@@ -129,6 +130,7 @@ Rules: `--bytes > 0` overrides `--bits`; `--bits` must be a multiple of `8`; gro
 
 ## GUI Notes (Safety-Centric)
 `scripts/usnpw_gui.py` uses the same service layer as CLI. The GUI safety model combines hardened safe-mode defaults, strict/session-only controls, copy guard, auto-clear timers, panic clear, encrypted export, and unsafe-path blocking for file-destructive actions.
+Team deployments can opt in to hardened GUI defaults by setting `USNPW_TEAM_HARDENED_DEFAULTS=1` (enables strict OPSEC lock, copy guard, and output auto-clear defaults).
 
 ## Container Operations Hardening
 In API mode, request envelopes are strict and persistence-sensitive fields are policy-locked. Username/path persistence overrides in request payloads are rejected by design, and runtime defaults keep persistence disabled.

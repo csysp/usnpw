@@ -265,3 +265,6 @@ Then reinstall from current artifacts and restart shell:
 py .\tools\release.py binaries
 py .\tools\release.py install-cli
 ```
+
+### `username blacklist contains hashed entries but no hash key is available`
+Blacklist-mode username persistence stores hashed entries and uses a local key sidecar at `<blacklist>.key`. Restore the matching key file or rotate the blacklist file and regenerate state for that persona.

@@ -79,6 +79,7 @@ Entropy is derived from `os.urandom`. Password mode uses unbiased rejection samp
 `stream` mode is the default and derives uniqueness from secret state plus counter. On Windows, persistence can use DPAPI protection. On non-Windows systems, plaintext persistence requires explicit opt-in.
 
 `blacklist` mode enforces uniqueness through a persisted username ledger and therefore increases artifact exposure risk.
+To reduce direct identifier leakage, persisted username blacklist entries are stored as keyed HMAC digests with a local key sidecar (`<blacklist>.key`) instead of raw usernames. Legacy raw entries are migrated to hashed entries when persistence runs with a valid key.
 
 ### Stream State and Locking
 Stream state is sensitive because it influences future generation behavior. Writer locking serializes state updates across processes. Operational recovery guidance lives in `docs/STREAM_STATE.md`.

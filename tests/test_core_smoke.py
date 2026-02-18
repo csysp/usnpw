@@ -14,6 +14,7 @@ from usnpw.core import (
     username_generation,
     username_lexicon,
     username_schemes,
+    username_storage,
     username_stream_state,
     username_uniqueness,
 )
@@ -264,6 +265,53 @@ class CoreSmokeTests(unittest.TestCase):
         cap_high = username_schemes.max_token_block_count(pools, schemes, max_scheme_pct=0.80)
         self.assertEqual(cap_low, cap_high)
         self.assertGreaterEqual(cap_low, 12)
+
+    def test_generate_unique_respects_hashed_username_blacklist(self) -> None:
+        key = bytes.fromhex("01" * 32)
+        blocked = username_storage.hash_username_key("alpha", key)
+
+        def _fixed_builder(  # type: ignore[no-untyped-def]
+            state,
+            pools,
+            history_n,
+        ):
+            del state, pools, history_n
+            return "alpha", "", "lower", {"alpha"}
+
+        state = username_schemes.GenState(
+            recent_schemes=[],
+            recent_seps=[],
+            recent_case_styles=[],
+            scheme_counts={},
+            total_target=1,
+            max_scheme_pct=1.0,
+        )
+        pools = username_lexicon.RunPools(
+            adjectives=["alpha"],
+            nouns=["alpha"],
+            verbs=["alpha"],
+            pseudos=["alpha"],
+            tags=["alpha"],
+        )
+        schemes = [username_schemes.Scheme("fixed", 1.0, _fixed_builder)]
+
+        with self.assertRaisesRegex(RuntimeError, "Failed to generate a unique username"):
+            username_generation.generate_unique(
+                username_blacklist_keys={blocked},
+                token_blacklist=set(),
+                max_len=32,
+                min_len=1,
+                policy=PLATFORM_POLICIES["generic"],
+                disallow_prefixes=tuple(),
+                disallow_substrings=tuple(),
+                state=state,
+                schemes=schemes,
+                pools=pools,
+                history_n=1,
+                block_tokens=False,
+                attempts=5,
+                username_key_hasher=lambda value: username_storage.hash_username_key(value, key),
+            )
 
 
 if __name__ == "__main__":
