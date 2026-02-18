@@ -14,7 +14,7 @@ USnPw is built for privacy-hardened credential generation, not anonymity or endp
 3. Clipboard, exports, and persistence paths create recoverable local artifacts.
 4. The tool supports minimization and hardening, but legal/compliance responsibility stays with operators.
 
-See `THREAT_MODEL.md` for the full LINDDUN-informed threat model and control mapping.
+See `THREAT_MODEL.md` for the full OWASP + ISACA + LINDDUN + OPSEC-aligned threat model and control mapping.
 
 ## Install and Setup
 Use `docs/SETUP.md` for complete setup instructions across Windows, Linux, and macOS.

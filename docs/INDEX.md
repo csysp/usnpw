@@ -23,7 +23,7 @@ Use this page as the routing map for USnPw documentation.
 |---|---|
 | `CONTRIBUTING.md` | Contribution workflow and coding expectations |
 | `SECURITY.md` | Vulnerability reporting policy |
-| `THREAT_MODEL.md` | Security goals, assumptions, and residual risk |
+| `THREAT_MODEL.md` | Cross-framework (OWASP/ISACA/LINDDUN/OPSEC) threat model, controls, and residual risk |
 | `LICENSE` | GPLv3 terms |
 
 ## Editorial Conventions

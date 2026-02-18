@@ -1,21 +1,22 @@
 # Threat Model
 
-Last updated: 2026-02-17
+Last updated: 2026-02-18
 
 This document defines the threat model for USnPw across CLI (`scripts/usnpw_cli.py`, `scripts/pwgen.py`, `scripts/opsec_username_gen.py`), GUI (`scripts/usnpw_gui.py`), API server (`scripts/usnpw_api.py`, `usnpw/api/*`), and container distribution.
 
 USnPw is designed for local-first and private-network service use. It is not intended to be internet-facing without additional controls.
 
-## Method Basis (LINDDUN-Informed)
-This model follows the LINDDUN privacy framing and lifecycle:
+## Method Basis (Cross-Framework)
+USnPw threat modeling uses four complementary lenses so privacy, security, and operator workflow constraints stay aligned:
 
-1. What are we working on?
-2. What can go wrong?
-3. What are we going to do about it?
-4. Did we do a good job?
-
-LINDDUN categories considered in scope: Linkability, Identifiability, Non-repudiation, Detectability, Disclosure of information, Unawareness/Unintervenability, and Non-compliance.
-Reference baseline: https://linddun.org/
+1. OWASP Threat Modeling Process:
+Model architecture and data flows, identify what can go wrong, apply mitigations, then validate outcomes.
+2. ISACA Threat Modeling Revisited (2025):
+Start from business objectives and scope, map the ecosystem and trust boundaries, prioritize threats by impact/likelihood, implement mitigations, and iterate continuously.
+3. LINDDUN:
+Use privacy-specific threat categories and threat trees to reason systematically about privacy failure modes.
+4. OPSEC tool-selection discipline:
+Choose controls that fit the actual threat actor and workflow reality; avoid both over-engineering and under-protecting sensitive operations.
 
 ## Assets
 - Generated passwords, tokens, and usernames (terminal, GUI, clipboard).
@@ -23,6 +24,30 @@ Reference baseline: https://linddun.org/
 - Token and username blacklist files when persistence is enabled.
 - API bearer token.
 - Exported plaintext or encrypted files.
+
+## Framework-to-Policy Alignment
+| Framework expectation | USnPw policy alignment | Primary evidence |
+|---|---|---|
+| Define scope and protected value | Mission and OPSEC boundaries define what is protected and what is out of scope | `AGENTS.md` mission/core directive, OPSEC boundaries in this file |
+| Map architecture and trust boundaries | Local-first architecture and service boundaries are explicit (CLI/GUI/API/core/container) | `docs/ARCHITECTURE.md`, entrypoint map in `README.md` |
+| Elicit threats systematically | Attacker models (A1-A5) + LINDDUN threat type mapping + API abuse scenarios | Attacker Models, LINDDUN Category Mapping, API Server Posture |
+| Prioritize and mitigate by impact | Hardened defaults, fail-closed validation, bounded runtime behavior, minimal persistence | Controls and Design Choices, AGENTS non-negotiables |
+| Validate and iterate | Preflight, fuzzing, pentest scripts, release gates, signature verification | `tools/release.py preflight`, `tools/security_audit.py`, CI workflows |
+| Align with governance/compliance | Non-compliance explicitly modeled; legal/regulatory accountability remains operator responsibility | OPSEC/compliance boundaries, Non-compliance mapping, release signing docs |
+
+## Policy Gates (AGENTS.md Realignment)
+These gates are non-optional and directly mapped to framework expectations:
+
+1. No silent failure:
+All sensitive-path failures return explicit errors and fail closed where state/persistence integrity matters.
+2. Minimal dependency and attack surface:
+Python stdlib-first policy is enforced unless explicit security review approves otherwise.
+3. No hidden data egress:
+No telemetry, analytics, or background network activity in core generation paths.
+4. Data minimization by default:
+Stream mode default, no username save/token save defaults, and hashed username persistence when ledger mode is enabled.
+5. Traceable release integrity:
+Checksums, signatures, and CI gates are part of the operational trust model.
 
 ## OPSEC Boundaries of Use
 These boundaries are explicit and non-ambiguous:
@@ -59,6 +84,20 @@ These boundaries are explicit and non-ambiguous:
 - `os.urandom` is secure.
 - Host OS and Python runtime are trusted.
 - API deployments control network reachability and firewall boundaries.
+
+## Threat Elicitation Procedure
+The operational procedure is intentionally repeatable:
+
+1. Scope and model:
+Document CLI, GUI, API, and persistence data flows and trust boundaries.
+2. Enumerate threats:
+Apply OWASP/STRIDE-style abuse thinking for security behavior and LINDDUN threat categories for privacy behavior.
+3. Refine with threat trees:
+Use LINDDUN threat trees per relevant category to move from broad class to concrete characteristics, impact factors, and examples.
+4. Prioritize and assign:
+Rank by likelihood and impact to mission, privacy exposure, and operator safety; then assign concrete mitigations and owners.
+5. Validate and iterate:
+Run preflight/security audit gates and update the model after material architecture, persistence, or deployment changes.
 
 ## LINDDUN Category Mapping
 | Category | USnPw exposure pattern | Primary controls |
@@ -112,3 +151,19 @@ Release artifacts include SHA-256 sidecars. CI supports GPG signatures for check
 - Persisted token and username ledgers can leak operational patterns.
 - Stream-state reset or rotation affects cross-run uniqueness guarantees.
 - Exposing API endpoints to untrusted networks without layered controls increases attack surface.
+
+## Review Triggers
+Threat model review is required when any of the following occurs:
+
+1. New persistence path, state file format, or export mode.
+2. New API endpoint, auth mode, or network exposure pattern.
+3. New platform profile or anti-fingerprinting behavior that changes output distribution.
+4. Material CI/release workflow change affecting artifact trust or provenance.
+5. Security incident, near miss, or repeated operator misuse pattern.
+
+## References
+- OWASP Threat Modeling Process: https://owasp.org/www-community/Threat_Modeling_Process
+- ISACA Threat Modeling Revisited (2025): https://www.isaca.org/resources/white-papers/2025/threat-modeling-revisited
+- Beginner Privacy OPSEC guidance (tool-selection section): https://bible.beginnerprivacy.com/opsec/opsecmistakes/#threat-modeling-choosing-the-right-tool-for-the-job
+- LINDDUN threat trees: https://linddun.org/threat-trees/
+- LINDDUN threat types: https://linddun.org/threat-types/
