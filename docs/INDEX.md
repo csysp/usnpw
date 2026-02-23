@@ -26,3 +26,4 @@ Use this page as the routing map for USnPw documentation.
 
 ## Editorial Conventions
 `README.md` stays concise and public-facing. `docs/SETUP.md` handles install and environment setup. `docs/ADVANCED_USAGE.md` is reserved for operational detail and tuning guidance.
+`docs/ARCHITECTURE.md` defines architecture-specific editorial rules and diagram maintenance expectations.
