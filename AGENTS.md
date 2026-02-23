@@ -78,7 +78,7 @@ Auditable credential generation for sensitive workflows.
 - `py -m unittest tests/test_service_layer.py`
 - Run sample generation in password and username modes across at least two platform profiles.
 
-## Phase 4 Release Ops
+## Release Ops
 - `py .\tools\release.py preflight` for compile + unit-test gate.
 - `py .\tools\release.py binaries` to build default host-native CLI binaries (`usnpw-<platform>-cli`) and checksums.
 - `py .\tools\release.py install-cli` to install the CLI command (`usnpw`) into a user-local bin and persist PATH.
