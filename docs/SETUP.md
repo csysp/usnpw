@@ -1,6 +1,8 @@
 # Setup
 
 USnPw is a local, offline CLI project with Python stdlib-only runtime dependencies.
+Setup varies dependant on the users needs, run via python script for easy iteration or run via command line with an included installer ps1 for Windows to add PATH etc.
+CSysP recommends CLI for day to day use as it is what is maintained via updates. 
 
 ## Requirements
 - Python 3.13 (recommended)
