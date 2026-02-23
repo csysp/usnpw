@@ -23,11 +23,11 @@ Out of scope:
 3. Minimize recoverable local artifacts by default.
 4. Fail closed on invalid inputs and unsupported secure-state pathways.
 5. Avoid dependency and network attack surface (stdlib-only, no telemetry, no background calls).
+6. In memory cleared on application exit. 
 
 ## Assets
 - Generated password outputs.
 - Generated username outputs.
-- Optional local exports produced by explicit user action.
 
 ## Trust Boundaries
 1. Host boundary:
@@ -43,7 +43,7 @@ Out of scope:
 2. Predictability drift:
    repetitive username structures at high volume.
 3. Local artifact leakage:
-   accidental retention in shell/history/exported files.
+   accidental retention in shell/history/memory
 4. Dependency expansion:
    additional third-party packages increasing supply-chain risk.
 
