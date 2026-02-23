@@ -25,8 +25,6 @@ flowchart LR
     UNSVC --> UNI[username_uniqueness]
     UNSVC --> STRM[username_stream_state]
 
-    NET[Network/Telemetry] -. not used .- C
-    DISK[Username/Token Persistence] -. not used by default .- UNSVC
 ```
 
 ## Runtime Flow
