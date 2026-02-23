@@ -6,6 +6,9 @@ Runtime cost is dominated by:
 - token blocking pressure
 - pool diversity (`pool_scale`)
 
+## Notes
+Overall performance is solid at present as large generations are capped first by token count. 
+
 ## Benchmark Helper
 Use:
 ```powershell
