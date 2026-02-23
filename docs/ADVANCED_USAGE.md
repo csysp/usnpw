@@ -1,7 +1,5 @@
 # Advanced Usage
 
-This guide focuses on the reduced private CLI profile.
-
 ## Username Generation Defaults
 `usnpw username` defaults are privacy-focused:
 - token blocking enabled (`block_tokens=True`)
@@ -36,10 +34,3 @@ Use `--show-meta` for debugging scheme/case/separator decisions.
 ```powershell
 usnpw username -n 10 --profile github --show-meta
 ```
-
-## Security Posture
-- no API surface
-- no GUI surface
-- no username/token persistence files
-- no stream-state persistence
-- no network calls or telemetry
