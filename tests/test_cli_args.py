@@ -7,20 +7,19 @@ from contextlib import redirect_stderr, redirect_stdout
 from usnpw.cli.opsec_username_cli import (
     main as username_main,
     parse_args as parse_username_args,
-    validate_safe_mode_args,
 )
 from usnpw.cli.pwgen_cli import parse_args as parse_password_args
 from usnpw.cli.usnpw_cli import main as usnpw_main
 
 
 class CliArgTests(unittest.TestCase):
-    def test_username_cli_stream_state_persist_flag(self) -> None:
-        args = parse_username_args(["-n", "1", "--no-stream-state-persist"])
-        self.assertTrue(args.no_stream_state_persist)
+    def test_username_cli_token_reuse_flag(self) -> None:
+        args = parse_username_args(["-n", "1", "--allow-token-reuse"])
+        self.assertTrue(args.allow_token_reuse)
 
-    def test_username_cli_stream_state_persist_default(self) -> None:
+    def test_username_cli_token_reuse_default(self) -> None:
         args = parse_username_args(["-n", "1"])
-        self.assertFalse(args.no_stream_state_persist)
+        self.assertFalse(args.allow_token_reuse)
 
     def test_password_cli_max_entropy_flag(self) -> None:
         args = parse_password_args(["--max-entropy"])
@@ -30,21 +29,12 @@ class CliArgTests(unittest.TestCase):
         args = parse_password_args([])
         self.assertFalse(args.max_entropy)
 
-    def test_username_cli_safe_mode_conflict_validation(self) -> None:
-        args = parse_username_args(["--safe-mode", "--allow-leading-digit"])
-        with self.assertRaisesRegex(ValueError, "safe-mode cannot be combined with conflicting options"):
-            validate_safe_mode_args(args)
-
-    def test_username_cli_safe_mode_non_conflicting_args_are_allowed(self) -> None:
-        args = parse_username_args(["--safe-mode", "-n", "1"])
-        validate_safe_mode_args(args)
-
-    def test_username_cli_main_hard_fails_on_safe_mode_conflict(self) -> None:
+    def test_username_cli_main_rejects_invalid_count(self) -> None:
         stderr = io.StringIO()
         with redirect_stderr(stderr):
-            rc = username_main(["--safe-mode", "--allow-leading-digit", "-n", "1"])
+            rc = username_main(["-n", "0"])
         self.assertEqual(rc, 2)
-        self.assertIn("safe-mode cannot be combined with conflicting options", stderr.getvalue())
+        self.assertIn("count must be > 0", stderr.getvalue())
 
     def test_usnpw_cli_defaults_to_password_mode(self) -> None:
         stdout = io.StringIO()
@@ -66,14 +56,6 @@ class CliArgTests(unittest.TestCase):
                     "1",
                     "--profile",
                     "reddit",
-                    "--blacklist",
-                    ".tmp_username_blacklist.txt",
-                    "--token-blacklist",
-                    ".tmp_username_tokens.txt",
-                    "--no-stream-state-persist",
-                    "--no-save",
-                    "--no-token-save",
-                    "--no-token-block",
                 ]
             )
         self.assertEqual(rc, 0)

@@ -11,7 +11,7 @@ Keep contributions minimal, auditable, and stdlib-first. Preserve hardened defau
 5. Open a PR that includes the problem statement, approach and tradeoffs, and validation evidence.
 
 ## Coding Standards
-No telemetry or hidden network behavior. No silent security or privacy failures. Keep `usnpw/core/*` reusable and keep CLI and GUI layers thin. Error messages should be explicit and actionable.
+No telemetry or hidden network behavior. No silent security or privacy failures. Keep `usnpw/core/*` reusable and keep the CLI layer thin. Error messages should be explicit and actionable.
 
 ## Security-Sensitive Changes
-Changes to uniqueness logic, stream state, token persistence, or export crypto must document threat-model rationale, failure behavior, and migration or compatibility notes when relevant.
+Changes to uniqueness logic, stream tagging/counter handling, release artifact verification, or output handling must document threat-model rationale, failure behavior, and migration or compatibility notes when relevant.

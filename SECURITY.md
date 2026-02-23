@@ -11,5 +11,3 @@ Reports are acknowledged promptly, triaged by severity, fixed with tests and rel
 
 ## Release Verification and Signing
 Release artifacts include `*.sha256` sidecars from `tools/release.py`. CI also signs checksum sidecars with GPG (workflow: `.github/workflows/release-artifacts.yml`, job: `Sign Checksums`) and publishes `*.sha256.asc` plus `usnpw-release-publickey.asc` in the `usnpw-signatures` artifact.
-
-GHCR images are cosign keyless-signed by default for tag publishes and manual publish runs (workflow: `.github/workflows/container-ghcr.yml`). Manual workflow runs can disable signing with `sign=false`.

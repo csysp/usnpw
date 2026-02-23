@@ -15,32 +15,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  source:
-    name: Source Bundle
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-
-      - name: Build source artifact
-        run: python tools/release.py all
-
-      - name: Upload source artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: usnpw-source
-          if-no-files-found: error
-          path: |
-            dist/usnpw-source-*.zip
-            dist/usnpw-source-*.zip.sha256
-
   binaries:
-    name: Native Binaries (${{ matrix.os }})
+    name: Native CLI Binaries (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -78,7 +54,6 @@ jobs:
   sign:
     name: Sign Checksums
     needs:
-      - source
       - binaries
     runs-on: ubuntu-latest
     steps:
@@ -158,7 +133,6 @@ jobs:
   publish-release:
     name: Publish Release
     needs:
-      - source
       - binaries
       - sign
     runs-on: ubuntu-latest
@@ -181,14 +155,6 @@ jobs:
           root = Path("artifacts")
           if not root.is_dir():
               print("::error::Missing artifacts/ directory.")
-              raise SystemExit(1)
-
-          app_dirs = sorted(p for p in root.rglob("*.app") if p.is_dir())
-          if app_dirs:
-              print("::error::Found .app directory bundles in artifacts. "
-                    "Raw release publishing does not support directory assets.")
-              for app_dir in app_dirs:
-                  print(f"::error::unsupported bundle: {app_dir.as_posix()}")
               raise SystemExit(1)
 
           selected_by_name: dict[str, Path] = {}

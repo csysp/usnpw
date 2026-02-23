@@ -162,7 +162,7 @@ def enforce_disjoint_pools(*pools: List[str]) -> Tuple[List[str], ...]:
 
 
 # Build big pools lazily to avoid import-time heavy initialization.
-# lru_cache provides a thread-safe (locked) one-time init, which matters for API server concurrency.
+# lru_cache provides a thread-safe one-time init for concurrent CLI worker usage.
 @lru_cache(maxsize=1)
 def _global_word_pools() -> Tuple[List[str], List[str], List[str], List[str], List[str]]:
     adjectives_all = dedupe_keep_order(ADJ_CORE)
@@ -192,7 +192,7 @@ def build_run_pools(
       - 1   = small subsets (more repetition inside a single run)
       - 2-3 = good balance
       - 4+  = very diverse within a run
-    token_blacklist removes already-used tokens (persistent if enabled).
+    token_blacklist removes already-used tokens for the current generation run.
     """
     adjectives_all, nouns_all, verbs_all, pseudo_all, tags_all = _global_word_pools()
 
@@ -216,8 +216,8 @@ def build_run_pools(
             return out
         raise RuntimeError(
             f"Token blacklist exhausted the '{pool_name}' pool. "
-            "Use a different token blacklist file for this persona, clear/rotate it, "
-            "or pass --no-token-block."
+            "Use a smaller --count, increase --pool-scale, "
+            "or pass --allow-token-reuse."
         )
 
     adj_src = without_blacklisted(adjectives_all, "adjectives")

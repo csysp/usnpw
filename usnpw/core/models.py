@@ -1,24 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Optional, Tuple
 
 
-DEFAULT_USERNAME_BLACKLIST = str(Path.home() / ".opsec_username_blacklist.txt")
-DEFAULT_USERNAME_TOKENS = str(Path.home() / ".opsec_username_tokens.txt")
-USERNAME_DEFAULT_UNIQUENESS_MODE = "stream"
-USERNAME_DEFAULT_NO_SAVE = True
-USERNAME_DEFAULT_NO_TOKEN_SAVE = True
 USERNAME_DEFAULT_NO_LEADING_DIGIT = True
 USERNAME_DEFAULT_MAX_SCHEME_PCT = 0.28
 USERNAME_DEFAULT_HISTORY = 10
 USERNAME_DEFAULT_POOL_SCALE = 4
 USERNAME_DEFAULT_INITIALS_WEIGHT = 0.0
-
-
-def default_stream_state_path(profile: str) -> Path:
-    return Path.home() / f".opsec_username_stream_{profile}.json"
 
 
 @dataclass(frozen=True)
@@ -52,18 +42,7 @@ class UsernameRequest:
     min_len: int = 8
     max_len: int = 16
     profile: str = "generic"
-    safe_mode: bool = False
-    uniqueness_mode: str = USERNAME_DEFAULT_UNIQUENESS_MODE
-    blacklist: str = DEFAULT_USERNAME_BLACKLIST
-    no_save: bool = USERNAME_DEFAULT_NO_SAVE
-    token_blacklist: str = DEFAULT_USERNAME_TOKENS
-    no_token_save: bool = USERNAME_DEFAULT_NO_TOKEN_SAVE
-    no_token_block: bool = False
-    stream_save_tokens: bool = False
-    stream_state: str = ""
-    stream_state_persist: bool = True
-    allow_plaintext_stream_state: bool = False
-    strict_windows_acl: bool = False
+    block_tokens: bool = True
     disallow_prefix: Tuple[str, ...] = ()
     disallow_substring: Tuple[str, ...] = ()
     no_leading_digit: bool = USERNAME_DEFAULT_NO_LEADING_DIGIT

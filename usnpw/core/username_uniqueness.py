@@ -54,49 +54,61 @@ def apply_stream_tag(core: str, tag: str, policy: PlatformPolicy, max_len: int, 
     if max_len <= 0:
         return ""
 
-    sep = policy.separators[selector % len(policy.separators)]
-    mode = selector % 4
+    # Stream uniqueness depends on carrying an untruncated counter tag into output.
+    # If the tag no longer fits the allowed max length, fail closed for this attempt.
+    if len(tag) > max_len:
+        return ""
 
-    # Mode 0/1: classic prefix/suffix, but randomized.
-    if mode in (0, 1):
+    non_empty_separators = tuple(sep for sep in policy.separators if sep)
+    sep = non_empty_separators[selector % len(non_empty_separators)] if non_empty_separators else ""
+
+    # Use three layouts with full contiguous tag placement.
+    # This keeps anti-fingerprint variability while preserving a unique tag component.
+    mode = selector % 3
+
+    def _compose_without_separator(local_mode: int) -> str:
+        core_budget = max_len - len(tag)
+        if core_budget <= 0:
+            return tag
+        core_part = core[:core_budget]
+        if local_mode == 0:
+            return f"{core_part}{tag}"
+        if local_mode == 1:
+            return f"{tag}{core_part}"
+        left_budget = core_budget // 2
+        right_budget = core_budget - left_budget
+        left = core_part[:left_budget]
+        right = core_part[left_budget : left_budget + right_budget]
+        return f"{left}{tag}{right}"
+
+    if mode == 0:
         reserved = len(tag) + (len(sep) if sep else 0)
         if reserved > max_len:
-            return tag[:max_len]
+            return _compose_without_separator(0)
         core_budget = max_len - reserved
         core = core[:core_budget]
-        if not core:
-            return tag
-        if mode == 0:
-            return f"{core}{sep}{tag}" if sep else f"{core}{tag}"
-        return f"{tag}{sep}{core}" if sep else f"{tag}{core}"
+        return f"{core}{sep}{tag}" if core else tag
 
-    # Mode 2: split tag around core to avoid a single obvious suffix/prefix shape.
-    if mode == 2:
-        if len(tag) > max_len:
-            return tag[:max_len]
-        core_budget = max_len - len(tag)
+    if mode == 1:
+        reserved = len(tag) + (len(sep) if sep else 0)
+        if reserved > max_len:
+            return _compose_without_separator(1)
+        core_budget = max_len - reserved
         core = core[:core_budget]
-        cut = len(tag) // 2
-        return f"{tag[:cut]}{core}{tag[cut:]}"
+        return f"{tag}{sep}{core}" if core else tag
 
-    # Mode 3: split tag into three segments and weave across core.
-    extra_sep = len(sep) * 2 if sep else 0
-    reserved = len(tag) + extra_sep
+    if not sep:
+        return _compose_without_separator(2)
+
+    reserved = len(tag) + (2 * len(sep))
     if reserved > max_len:
-        return tag[:max_len]
+        return _compose_without_separator(2)
     core_budget = max_len - reserved
-    core = core[:core_budget]
-    cut1 = len(tag) // 3
-    cut2 = (2 * len(tag)) // 3
-    t1 = tag[:cut1]
-    t2 = tag[cut1:cut2]
-    t3 = tag[cut2:]
-    ccut = len(core) // 2
-    c1 = core[:ccut]
-    c2 = core[ccut:]
-    if sep:
-        return f"{t1}{c1}{sep}{t2}{c2}{sep}{t3}"
-    return f"{t1}{c1}{t2}{c2}{t3}"
+    left_budget = core_budget // 2
+    right_budget = core_budget - left_budget
+    left = core[:left_budget]
+    right = core[-right_budget:] if right_budget > 0 else ""
+    return f"{left}{sep}{tag}{sep}{right}" if (left or right) else tag
 
 
 def token_saturation_message(requested: int, generated: int, token_cap: int | None) -> str:
@@ -105,8 +117,8 @@ def token_saturation_message(requested: int, generated: int, token_cap: int | No
     return (
         "Token-block saturation reached before target count. "
         f"requested={requested}, generated={generated}. "
-        f"{cap_part}try --count <= {suggested}, rotate/clear --token-blacklist, "
-        "increase --max-scheme-pct, or pass --no-token-block."
+        f"{cap_part}try --count <= {suggested}, increase --pool-scale, "
+        "or pass --allow-token-reuse."
     )
 
 

@@ -21,7 +21,7 @@ def _print_help() -> None:
         "\n"
         "Examples:\n"
         "  usnpw -n 5 -l 24\n"
-        "  usnpw username -n 20 --profile reddit --safe-mode\n"
+        "  usnpw username -n 20 --profile reddit\n"
     )
 
 

@@ -1,6 +1,6 @@
 ---
 name: Bug report
-about: Report a reproducible defect in CLI, GUI, API, or release workflows
+about: Report a reproducible defect in CLI or release workflows
 title: "[bug] "
 labels: bug
 assignees: ""
@@ -20,7 +20,7 @@ Describe what should have happened.
 ## Environment
 - OS and version:
 - Python version (`python --version` or `py --version`):
-- Execution mode: source / binary / container
+- Execution mode: source / binary
 - If binary: exact artifact name (for example `usnpw-windows-cli.exe`)
 - If relevant: shell used (PowerShell, bash, zsh, etc.)
 

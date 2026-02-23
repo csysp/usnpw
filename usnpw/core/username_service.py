@@ -1,45 +1,19 @@
 from __future__ import annotations
 
 import os
-from dataclasses import replace
-from pathlib import Path
 
 from usnpw.core import username_generation, username_lexicon, username_policies, username_schemes
-from usnpw.core import username_storage, username_stream_state, username_uniqueness
+from usnpw.core import username_stream_state, username_uniqueness
 from usnpw.core.models import (
     USERNAME_DEFAULT_HISTORY,
     USERNAME_DEFAULT_INITIALS_WEIGHT,
     USERNAME_DEFAULT_MAX_SCHEME_PCT,
     USERNAME_DEFAULT_NO_LEADING_DIGIT,
-    USERNAME_DEFAULT_NO_SAVE,
-    USERNAME_DEFAULT_NO_TOKEN_SAVE,
     USERNAME_DEFAULT_POOL_SCALE,
-    USERNAME_DEFAULT_UNIQUENESS_MODE,
     UsernameRecord,
     UsernameRequest,
     UsernameResult,
-    default_stream_state_path,
 )
-
-
-def apply_safe_mode_overrides(request: UsernameRequest) -> UsernameRequest:
-    if not request.safe_mode:
-        return request
-    return replace(
-        request,
-        uniqueness_mode=USERNAME_DEFAULT_UNIQUENESS_MODE,
-        no_save=USERNAME_DEFAULT_NO_SAVE,
-        no_token_save=USERNAME_DEFAULT_NO_TOKEN_SAVE,
-        no_token_block=False,
-        stream_save_tokens=False,
-        allow_plaintext_stream_state=False,
-        no_leading_digit=USERNAME_DEFAULT_NO_LEADING_DIGIT,
-        max_scheme_pct=USERNAME_DEFAULT_MAX_SCHEME_PCT,
-        history=USERNAME_DEFAULT_HISTORY,
-        pool_scale=USERNAME_DEFAULT_POOL_SCALE,
-        initials_weight=USERNAME_DEFAULT_INITIALS_WEIGHT,
-        show_meta=False,
-    )
 
 
 def _validate_request(request: UsernameRequest) -> tuple[username_policies.PlatformPolicy, int, int]:
@@ -59,8 +33,6 @@ def _validate_request(request: UsernameRequest) -> tuple[username_policies.Platf
 
     if request.profile not in username_policies.PLATFORM_POLICIES:
         raise ValueError(f"Unknown profile: {request.profile}")
-    if request.uniqueness_mode not in ("blacklist", "stream"):
-        raise ValueError(f"Unknown uniqueness mode: {request.uniqueness_mode}")
 
     policy = username_policies.PLATFORM_POLICIES[request.profile]
     effective_min_len = max(request.min_len, policy.min_len)
@@ -71,58 +43,6 @@ def _validate_request(request: UsernameRequest) -> tuple[username_policies.Platf
             f"effective min {effective_min_len} > effective max {effective_max_len}."
         )
     return policy, effective_min_len, effective_max_len
-
-
-def _load_username_blacklist(
-    bl_path: Path,
-    *,
-    enabled: bool,
-    case_insensitive: bool,
-    hash_key: bytes | None,
-) -> tuple[set[str], tuple[str, ...] | None, bool]:
-    if not enabled:
-        return set(), None, False
-
-    username_blacklist: set[str] = set()
-    hashed_entries: set[str] | None = set() if hash_key is not None else None
-    saw_legacy_raw_entries = False
-    for username in username_storage.load_lineset(bl_path, "username blacklist"):
-        hashed_entry = username_storage.parse_hashed_username_entry(username)
-        if hashed_entry is not None:
-            if hash_key is None:
-                raise ValueError(
-                    "username blacklist contains hashed entries but no hash key is available. "
-                    f"Expected key file: {username_storage.username_hash_key_path(bl_path)}"
-                )
-            username_blacklist.add(hashed_entry)
-            if hashed_entries is not None:
-                hashed_entries.add(hashed_entry)
-            continue
-        key = username_generation.normalize_username_key(username, case_insensitive=case_insensitive)
-        if key:
-            if hash_key is None:
-                username_blacklist.add(key)
-                continue
-            saw_legacy_raw_entries = True
-            hashed_key = username_storage.hash_username_key(key, hash_key)
-            username_blacklist.add(hashed_key)
-            if hashed_entries is not None:
-                hashed_entries.add(hashed_key)
-    if hashed_entries is None:
-        return username_blacklist, None, False
-    return username_blacklist, tuple(sorted(hashed_entries)), saw_legacy_raw_entries
-
-
-def _load_token_blacklist(token_path: Path, *, enabled: bool) -> set[str]:
-    if not enabled:
-        return set()
-
-    token_blacklist: set[str] = set()
-    for token in username_storage.load_lineset(token_path, "token blacklist"):
-        normalized = username_lexicon.normalize_token(token)
-        if normalized:
-            token_blacklist.add(normalized)
-    return token_blacklist
 
 
 def _build_schemes(initials_weight: float) -> list[username_schemes.Scheme]:
@@ -147,7 +67,7 @@ def _generation_error(
     token_cap: int | None,
     exc: RuntimeError,
 ) -> ValueError:
-    if block_tokens:
+    if block_tokens and str(exc) == username_generation.TOKEN_BLOCK_EXHAUSTION_ERROR:
         return ValueError(
             username_uniqueness.token_saturation_message(
                 requested=requested,
@@ -159,303 +79,116 @@ def _generation_error(
 
 
 def generate_usernames(request: UsernameRequest) -> UsernameResult:
-    request = apply_safe_mode_overrides(request)
     policy, effective_min_len, effective_max_len = _validate_request(request)
+    schemes = _build_schemes(request.initials_weight)
 
+    token_blacklist: set[str] = set()
     try:
-        bl_path = Path(request.blacklist).expanduser()
-        username_blacklist_lock: username_stream_state.StreamStateLock | None = None
-        token_blacklist_lock: username_stream_state.StreamStateLock | None = None
-        token_persist_enabled = (
-            not request.no_token_block
-            and not request.no_token_save
-            and (request.uniqueness_mode == "blacklist" or request.stream_save_tokens)
+        pools = username_lexicon.build_run_pools(
+            count=request.count,
+            pool_scale=request.pool_scale,
+            token_blacklist=token_blacklist if request.block_tokens else set(),
         )
-        if request.uniqueness_mode == "blacklist" and not request.no_save:
-            # Threat model: in blacklist mode with persistence enabled, load+append must be
-            # serialized across processes to avoid duplicate admissions from stale in-memory sets.
-            try:
-                username_blacklist_lock = username_stream_state.acquire_stream_state_lock(bl_path)
-            except (OSError, ValueError) as exc:
-                raise ValueError(f"Unable to acquire username blacklist lock '{bl_path}': {exc}") from exc
+    except RuntimeError as exc:
+        raise ValueError(str(exc)) from exc
 
-        token_path = Path(request.token_blacklist).expanduser()
-        if token_persist_enabled:
-            # Threat model: token-block uniqueness should remain stable across concurrent
-            # writers when persistence is enabled, so load+append is serialized.
-            try:
-                token_blacklist_lock = username_stream_state.acquire_stream_state_lock(token_path)
-            except (OSError, ValueError) as exc:
-                raise ValueError(f"Unable to acquire token blacklist lock '{token_path}': {exc}") from exc
+    state = username_schemes.GenState(
+        recent_schemes=[],
+        recent_seps=[],
+        recent_case_styles=[],
+        scheme_counts={},
+        total_target=request.count,
+        max_scheme_pct=request.max_scheme_pct,
+    )
+    history_n = max(1, request.history)
 
-        username_hash_key: bytes | None = None
-        if request.uniqueness_mode == "blacklist":
-            username_hash_key = username_storage.load_username_hash_key(
-                bl_path,
-                create_if_missing=not request.no_save,
-                strict_windows_acl=request.strict_windows_acl,
-            )
+    disallow_prefixes = list(request.disallow_prefix)
+    if request.no_leading_digit:
+        disallow_prefixes.extend(str(digit) for digit in range(10))
+    effective_disallow_prefixes = tuple(disallow_prefixes)
+    effective_disallow_substrings = tuple(request.disallow_substring)
 
-        username_blacklist, persisted_hashed_entries, saw_legacy_raw_entries = _load_username_blacklist(
-            bl_path,
-            enabled=request.uniqueness_mode == "blacklist",
-            case_insensitive=policy.case_insensitive,
-            hash_key=username_hash_key,
-        )
-        if (
-            request.uniqueness_mode == "blacklist"
-            and not request.no_save
-            and saw_legacy_raw_entries
-            and persisted_hashed_entries is not None
-        ):
-            # Migration note: once a hash key exists, rewrite legacy raw entries to hashed
-            # entries under the same blacklist lock, so persisted identifiers are minimized.
-            username_storage.replace_lines(
-                bl_path,
-                persisted_hashed_entries,
-                strict_windows_acl=request.strict_windows_acl,
-            )
-        token_blacklist = _load_token_blacklist(token_path, enabled=not request.no_token_block)
-        schemes = _build_schemes(request.initials_weight)
-        username_key_hasher = None
-        if username_hash_key is not None:
-            username_key_hasher = lambda key: username_storage.hash_username_key(key, username_hash_key)
-
-        try:
-            pools = username_lexicon.build_run_pools(
-                count=request.count,
-                pool_scale=request.pool_scale,
-                token_blacklist=token_blacklist if not request.no_token_block else set(),
-            )
-        except RuntimeError as exc:
-            raise ValueError(str(exc)) from exc
-
-        state = username_schemes.GenState(
-            recent_schemes=[],
-            recent_seps=[],
-            recent_case_styles=[],
-            scheme_counts={},
-            total_target=request.count,
+    token_cap: int | None = None
+    if request.block_tokens:
+        token_cap = username_schemes.max_token_block_count(
+            pools=pools,
+            schemes=schemes,
             max_scheme_pct=request.max_scheme_pct,
         )
-
-        history_n = max(1, request.history)
-        block_tokens = not request.no_token_block
-        disallow_prefixes = list(request.disallow_prefix)
-        if request.no_leading_digit:
-            disallow_prefixes.extend(str(d) for d in range(10))
-        effective_disallow_prefixes = tuple(disallow_prefixes)
-        effective_disallow_substrings = tuple(request.disallow_substring)
-
-        token_cap: int | None = None
-        if block_tokens:
-            token_cap = username_schemes.max_token_block_count(
-                pools=pools,
-                schemes=schemes,
-                max_scheme_pct=request.max_scheme_pct,
+        if token_cap is not None and request.count > token_cap:
+            suggested = max(1, int(token_cap * 0.82))
+            raise ValueError(
+                "count exceeds token-block theoretical capacity for this run: "
+                f"requested={request.count}, theoretical_max={token_cap}. "
+                f"Try count <= {suggested}, increase --pool-scale, or pass --allow-token-reuse."
             )
-            if token_cap is not None and request.count > token_cap:
-                suggested = max(1, int(token_cap * 0.82))
-                raise ValueError(
-                    "count exceeds token-block theoretical capacity for this run: "
-                    f"requested={request.count}, theoretical_max={token_cap}. "
-                    "Token blocking requires fresh component tokens per username, and the "
-                    "current available token pools cannot satisfy a larger batch. "
-                    f"Available pools after token filtering: adj={len(pools.adjectives)}, "
-                    f"noun={len(pools.nouns)}, verb={len(pools.verbs)}, pseudo={len(pools.pseudos)}. "
-                    f"Practical stable target is often lower; try count <= {suggested}. "
-                    "Use a smaller count, rotate or clear token_blacklist, increase "
-                    "pool_scale, or disable token blocking."
-                )
 
-        records: list[UsernameRecord] = []
-        usernames_to_save: list[str] = []
-        tokens_to_save: set[str] = set()
-        stream_state_path: Path | None = None
-        stream_state_persistent = False
-        stream_root_secret = b""
-        stream_key: bytes
-        stream_tag_map: dict[str, str]
-        stream_counter: int
-        stream_lock: username_stream_state.StreamStateLock | None = None
+    stream_root_secret = os.urandom(32)
+    stream_key = username_stream_state.derive_stream_profile_key(stream_root_secret, request.profile)
+    stream_tag_map = username_stream_state.derive_stream_tag_map(stream_key)
+    stream_counter = 0
+    stream_username_keys: set[str] = set()
 
+    records: list[UsernameRecord] = []
+    for _ in range(request.count):
         try:
-            if request.uniqueness_mode == "stream":
-                stream_state_persistent = request.stream_state_persist and (
-                    os.name == "nt" or request.allow_plaintext_stream_state
-                )
-                if stream_state_persistent:
-                    if request.stream_state:
-                        stream_state_path = Path(request.stream_state).expanduser()
-                    else:
-                        stream_state_path = default_stream_state_path(request.profile)
-
-                    try:
-                        stream_lock = username_stream_state.acquire_stream_state_lock(stream_state_path)
-                    except OSError as exc:
-                        raise ValueError(f"Unable to acquire stream state lock '{stream_state_path}': {exc}") from exc
-                    try:
-                        stream_root_secret, stream_counter = username_stream_state.load_or_init_stream_state(
-                            stream_state_path,
-                            allow_plaintext=request.allow_plaintext_stream_state,
-                            strict_windows_acl=request.strict_windows_acl,
-                        )
-                    except OSError as exc:
-                        raise ValueError(f"Unable to initialize stream state '{stream_state_path}': {exc}") from exc
-                else:
-                    stream_root_secret = os.urandom(32)
-                    stream_counter = 0
-                stream_key = username_stream_state.derive_stream_profile_key(stream_root_secret, request.profile)
-                stream_tag_map = username_stream_state.derive_stream_tag_map(stream_key)
-                for _ in range(request.count):
-                    if stream_state_persistent and stream_lock is not None:
-                        username_stream_state.touch_stream_state_lock(stream_lock)
-                    try:
-                        (
-                            username,
-                            scheme_name,
-                            sep_used,
-                            case_style_used,
-                            used_tokens,
-                            stream_counter,
-                        ) = username_generation.generate_stream_unique(
-                            stream_key=stream_key,
-                            stream_tag_map=stream_tag_map,
-                            stream_counter=stream_counter,
-                            token_blacklist=token_blacklist,
-                            max_len=effective_max_len,
-                            min_len=effective_min_len,
-                            policy=policy,
-                            disallow_prefixes=effective_disallow_prefixes,
-                            disallow_substrings=effective_disallow_substrings,
-                            state=state,
-                            schemes=schemes,
-                            pools=pools,
-                            history_n=history_n,
-                            block_tokens=block_tokens,
-                        )
-                    except RuntimeError as exc:
-                        raise _generation_error(
-                            block_tokens=block_tokens,
-                            requested=request.count,
-                            generated=len(records),
-                            token_cap=token_cap,
-                            exc=exc,
-                        ) from exc
-
-                    if stream_state_persistent and stream_state_path is not None:
-                        try:
-                            username_stream_state.save_stream_state(
-                                stream_state_path,
-                                stream_root_secret,
-                                stream_counter,
-                                allow_plaintext=request.allow_plaintext_stream_state,
-                                strict_windows_acl=request.strict_windows_acl,
-                            )
-                        except OSError as exc:
-                            raise ValueError(f"Unable to save stream state '{stream_state_path}': {exc}") from exc
-                    records.append(
-                        UsernameRecord(
-                            username=username,
-                            scheme=scheme_name,
-                            separator=sep_used,
-                            case_style=case_style_used,
-                        )
-                    )
-                    if block_tokens and used_tokens:
-                        tokens_to_save |= used_tokens
-                        token_blacklist |= used_tokens
-            else:
-                for _ in range(request.count):
-                    try:
-                        (
-                            username,
-                            scheme_name,
-                            sep_used,
-                            case_style_used,
-                            used_tokens,
-                        ) = username_generation.generate_unique(
-                            username_blacklist_keys=username_blacklist,
-                            token_blacklist=token_blacklist,
-                            max_len=effective_max_len,
-                            min_len=effective_min_len,
-                            policy=policy,
-                            disallow_prefixes=effective_disallow_prefixes,
-                            disallow_substrings=effective_disallow_substrings,
-                            state=state,
-                            schemes=schemes,
-                            pools=pools,
-                            history_n=history_n,
-                            block_tokens=block_tokens,
-                            username_key_hasher=username_key_hasher,
-                        )
-                    except RuntimeError as exc:
-                        raise _generation_error(
-                            block_tokens=block_tokens,
-                            requested=request.count,
-                            generated=len(records),
-                            token_cap=token_cap,
-                            exc=exc,
-                        ) from exc
-
-                    records.append(
-                        UsernameRecord(
-                            username=username,
-                            scheme=scheme_name,
-                            separator=sep_used,
-                            case_style=case_style_used,
-                        )
-                    )
-                    username_key = username_generation.normalize_username_key(
-                        username,
-                        case_insensitive=policy.case_insensitive,
-                    )
-                    if username_key_hasher is not None:
-                        username_blacklist.add(username_key_hasher(username_key))
-                    else:
-                        username_blacklist.add(username_key)
-                    if not request.no_save:
-                        if username_key_hasher is not None:
-                            usernames_to_save.append(username_key_hasher(username_key))
-                        else:
-                            usernames_to_save.append(username_key)
-                    if block_tokens and used_tokens:
-                        tokens_to_save |= used_tokens
-                        token_blacklist |= used_tokens
-
-            should_persist_usernames = not request.no_save and usernames_to_save
-            if should_persist_usernames:
-                username_storage.append_lines(
-                    bl_path,
-                    usernames_to_save,
-                    strict_windows_acl=request.strict_windows_acl,
-                )
-
-            should_persist_tokens = (
-                block_tokens
-                and tokens_to_save
-                and not request.no_token_save
-                and (request.uniqueness_mode == "blacklist" or request.stream_save_tokens)
+            (
+                username,
+                scheme_name,
+                sep_used,
+                case_style_used,
+                used_tokens,
+                stream_counter,
+            ) = username_generation.generate_stream_unique(
+                stream_key=stream_key,
+                stream_tag_map=stream_tag_map,
+                stream_counter=stream_counter,
+                token_blacklist=token_blacklist,
+                max_len=effective_max_len,
+                min_len=effective_min_len,
+                policy=policy,
+                disallow_prefixes=effective_disallow_prefixes,
+                disallow_substrings=effective_disallow_substrings,
+                state=state,
+                schemes=schemes,
+                pools=pools,
+                history_n=history_n,
+                block_tokens=request.block_tokens,
+                existing_username_keys=stream_username_keys,
             )
-            if should_persist_tokens:
-                username_storage.append_lines(
-                    token_path,
-                    sorted(tokens_to_save),
-                    strict_windows_acl=request.strict_windows_acl,
-                )
-
-            return UsernameResult(
-                records=tuple(records),
-                effective_min_len=effective_min_len,
-                effective_max_len=effective_max_len,
+        except RuntimeError as exc:
+            raise _generation_error(
+                block_tokens=request.block_tokens,
+                requested=request.count,
+                generated=len(records),
                 token_cap=token_cap,
+                exc=exc,
+            ) from exc
+
+        records.append(
+            UsernameRecord(
+                username=username,
+                scheme=scheme_name,
+                separator=sep_used,
+                case_style=case_style_used,
             )
-        finally:
-            if stream_lock is not None:
-                username_stream_state.release_stream_state_lock(stream_lock)
-            if token_blacklist_lock is not None:
-                username_stream_state.release_stream_state_lock(token_blacklist_lock)
-            if username_blacklist_lock is not None:
-                username_stream_state.release_stream_state_lock(username_blacklist_lock)
-    except (OSError, UnicodeError) as exc:
-        raise ValueError(f"I/O failure during username generation: {exc}") from exc
+        )
+        if request.block_tokens and used_tokens:
+            token_blacklist |= used_tokens
+
+    return UsernameResult(
+        records=tuple(records),
+        effective_min_len=effective_min_len,
+        effective_max_len=effective_max_len,
+        token_cap=token_cap if request.block_tokens else None,
+    )
+
+
+__all__ = [
+    "USERNAME_DEFAULT_NO_LEADING_DIGIT",
+    "USERNAME_DEFAULT_MAX_SCHEME_PCT",
+    "USERNAME_DEFAULT_HISTORY",
+    "USERNAME_DEFAULT_POOL_SCALE",
+    "USERNAME_DEFAULT_INITIALS_WEIGHT",
+    "generate_usernames",
+]
