@@ -11,6 +11,15 @@ from usnpw.core import username_uniqueness as uniqueness
 from usnpw.core.username_policies import PlatformPolicy
 
 TOKEN_BLOCK_EXHAUSTION_ERROR = "Token-block candidate space exhausted within attempt budget."
+UNIQUE_ATTEMPT_BUDGET_ERROR = (
+    "Failed to generate a unique username within attempt budget. "
+    "Try increasing --max-len, lowering --min-len, or relaxing constraints."
+)
+STREAM_ATTEMPT_BUDGET_ERROR = (
+    "Failed to generate a stream-unique username within attempt budget. "
+    "Try increasing --max-len, lowering --min-len, or relaxing constraints."
+)
+_UNIQUE_ATTEMPT_BUDGET_PREFIX = "Failed to generate a unique username within attempt budget."
 
 
 def _encode_counter_bytes(counter: int) -> bytes:
@@ -50,8 +59,14 @@ def _stream_base_attempts(total_attempts: int, *, block_tokens: bool) -> int:
     if total_attempts <= 0:
         return 1
     if block_tokens:
-        return max(60, min(240, total_attempts // 8))
-    return max(30, min(120, total_attempts // 10))
+        target = min(240, max(1, total_attempts // 8))
+    else:
+        target = min(120, max(1, total_attempts // 10))
+    return max(1, min(total_attempts, target))
+
+
+def _is_unique_attempt_budget_error(msg: str) -> bool:
+    return msg.startswith(_UNIQUE_ATTEMPT_BUDGET_PREFIX)
 
 
 def normalize_for_platform(u: str, policy: PlatformPolicy, max_len: int) -> str:
@@ -94,6 +109,9 @@ def generate_unique(
     push_state: bool = True,
     username_key_hasher: Callable[[str], str] | None = None,
 ) -> Tuple[str, str, str, str, Set[str]]:
+    if not schemes:
+        raise RuntimeError("No generation schemes available for username generation.")
+
     prefixes, subs = _normalized_disallow_filters(policy, disallow_prefixes, disallow_substrings)
 
     saw_token_conflict = False
@@ -101,7 +119,12 @@ def generate_unique(
 
     for _ in range(attempts):
         scheme = schemes_mod.pick_scheme(state, schemes)
-        raw_u, sep_used, case_style_used, tokens_used = scheme.builder(state, pools, history_n)
+        try:
+            raw_u, sep_used, case_style_used, tokens_used = scheme.builder(state, pools, history_n)
+        except IndexError as exc:
+            raise RuntimeError(
+                "Generator pools are empty for the selected scheme; cannot build username candidate."
+            ) from exc
 
         u = normalize_for_platform(raw_u, policy=policy, max_len=max_len)
         if not u or len(u) < min_len:
@@ -143,10 +166,7 @@ def generate_unique(
     if block_tokens and saw_token_conflict and not saw_non_token_rejection:
         raise RuntimeError(TOKEN_BLOCK_EXHAUSTION_ERROR)
 
-    raise RuntimeError(
-        "Failed to generate a unique username within attempt budget. "
-        "Try increasing --max-len, lowering --min-len, or relaxing constraints."
-    )
+    raise RuntimeError(UNIQUE_ATTEMPT_BUDGET_ERROR)
 
 
 def generate_stream_unique(
@@ -196,9 +216,13 @@ def generate_stream_unique(
                 push_state=False,
             )
         except RuntimeError as exc:
-            if block_tokens and str(exc) == TOKEN_BLOCK_EXHAUSTION_ERROR:
+            msg = str(exc)
+            if block_tokens and msg == TOKEN_BLOCK_EXHAUSTION_ERROR:
                 saw_token_exhaustion = True
-            continue
+                continue
+            if _is_unique_attempt_budget_error(msg):
+                continue
+            raise
 
         counter_bytes = _encode_counter_bytes(stream_counter)
         layout_digest = hmac.new(stream_key, b"layout:" + counter_bytes, hashlib.sha256).digest()
@@ -236,14 +260,13 @@ def generate_stream_unique(
     if block_tokens and saw_token_exhaustion:
         raise RuntimeError(TOKEN_BLOCK_EXHAUSTION_ERROR)
 
-    raise RuntimeError(
-        "Failed to generate a stream-unique username within attempt budget. "
-        "Try increasing --max-len, lowering --min-len, or relaxing constraints."
-    )
+    raise RuntimeError(STREAM_ATTEMPT_BUDGET_ERROR)
 
 
 __all__ = [
     "TOKEN_BLOCK_EXHAUSTION_ERROR",
+    "UNIQUE_ATTEMPT_BUDGET_ERROR",
+    "STREAM_ATTEMPT_BUDGET_ERROR",
     "normalize_for_platform",
     "normalize_username_key",
     "generate_unique",

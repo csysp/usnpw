@@ -299,6 +299,171 @@ class CoreSmokeTests(unittest.TestCase):
                     attempts=3,
                 )
 
+    def test_stream_generation_propagates_unexpected_inner_runtime_error(self) -> None:
+        stream_key = b"\x08" * 32
+        base36 = "0123456789abcdefghijklmnopqrstuvwxyz"
+        tag_map = {ch: ch for ch in base36}
+        policy = PLATFORM_POLICIES["reddit"]
+        pools = username_lexicon.RunPools(
+            adjectives=["able"],
+            nouns=["node"],
+            verbs=["build"],
+            pseudos=["keko"],
+            tags=["xx"],
+        )
+        schemes = [username_schemes.Scheme("adj_noun", 1.0, username_schemes.scheme_adj_noun)]
+        state = username_schemes.GenState(
+            recent_schemes=[],
+            recent_seps=[],
+            recent_case_styles=[],
+            scheme_counts={},
+            total_target=1,
+            max_scheme_pct=1.0,
+        )
+
+        with patch(
+            "usnpw.core.username_generation.generate_unique",
+            side_effect=RuntimeError("boom-scheme-error"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "boom-scheme-error"):
+                username_generation.generate_stream_unique(
+                    stream_key=stream_key,
+                    stream_tag_map=tag_map,
+                    stream_counter=0,
+                    token_blacklist=set(),
+                    max_len=16,
+                    min_len=policy.min_len,
+                    policy=policy,
+                    disallow_prefixes=tuple(),
+                    disallow_substrings=tuple(),
+                    state=state,
+                    schemes=schemes,
+                    pools=pools,
+                    history_n=1,
+                    block_tokens=False,
+                    attempts=3,
+                )
+
+    def test_stream_generation_inner_attempt_budget_respects_small_attempts(self) -> None:
+        stream_key = b"\x09" * 32
+        base36 = "0123456789abcdefghijklmnopqrstuvwxyz"
+        tag_map = {ch: ch for ch in base36}
+        policy = PLATFORM_POLICIES["reddit"]
+        pools = username_lexicon.RunPools(
+            adjectives=["able"],
+            nouns=["node"],
+            verbs=["build"],
+            pseudos=["keko"],
+            tags=["xx"],
+        )
+        schemes = [username_schemes.Scheme("adj_noun", 1.0, username_schemes.scheme_adj_noun)]
+        state = username_schemes.GenState(
+            recent_schemes=[],
+            recent_seps=[],
+            recent_case_styles=[],
+            scheme_counts={},
+            total_target=1,
+            max_scheme_pct=1.0,
+        )
+        seen_attempts: list[int] = []
+
+        def _fake_generate_unique(*args, **kwargs):  # type: ignore[no-untyped-def]
+            del args
+            seen_attempts.append(kwargs["attempts"])
+            raise RuntimeError(username_generation.UNIQUE_ATTEMPT_BUDGET_ERROR)
+
+        with patch("usnpw.core.username_generation.generate_unique", side_effect=_fake_generate_unique):
+            with self.assertRaisesRegex(RuntimeError, "stream-unique username"):
+                username_generation.generate_stream_unique(
+                    stream_key=stream_key,
+                    stream_tag_map=tag_map,
+                    stream_counter=0,
+                    token_blacklist=set(),
+                    max_len=16,
+                    min_len=policy.min_len,
+                    policy=policy,
+                    disallow_prefixes=tuple(),
+                    disallow_substrings=tuple(),
+                    state=state,
+                    schemes=schemes,
+                    pools=pools,
+                    history_n=1,
+                    block_tokens=False,
+                    attempts=1,
+                )
+        self.assertEqual(seen_attempts, [1])
+
+    def test_generate_unique_rejects_empty_scheme_list(self) -> None:
+        policy = PLATFORM_POLICIES["reddit"]
+        pools = username_lexicon.RunPools(
+            adjectives=["able"],
+            nouns=["node"],
+            verbs=["build"],
+            pseudos=["keko"],
+            tags=["xx"],
+        )
+        state = username_schemes.GenState(
+            recent_schemes=[],
+            recent_seps=[],
+            recent_case_styles=[],
+            scheme_counts={},
+            total_target=1,
+            max_scheme_pct=1.0,
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "No generation schemes available"):
+            username_generation.generate_unique(
+                username_blacklist_keys=set(),
+                token_blacklist=set(),
+                max_len=16,
+                min_len=3,
+                policy=policy,
+                disallow_prefixes=tuple(),
+                disallow_substrings=tuple(),
+                state=state,
+                schemes=[],
+                pools=pools,
+                history_n=1,
+                block_tokens=False,
+                attempts=5,
+            )
+
+    def test_generate_unique_reports_empty_pool_for_selected_scheme(self) -> None:
+        policy = PLATFORM_POLICIES["reddit"]
+        pools = username_lexicon.RunPools(
+            adjectives=[],
+            nouns=["node"],
+            verbs=["build"],
+            pseudos=["keko"],
+            tags=["xx"],
+        )
+        state = username_schemes.GenState(
+            recent_schemes=[],
+            recent_seps=[],
+            recent_case_styles=[],
+            scheme_counts={},
+            total_target=1,
+            max_scheme_pct=1.0,
+        )
+        schemes = [username_schemes.Scheme("adj_noun", 1.0, username_schemes.scheme_adj_noun)]
+
+        with self.assertRaisesRegex(RuntimeError, "Generator pools are empty for the selected scheme"):
+            username_generation.generate_unique(
+                username_blacklist_keys=set(),
+                token_blacklist=set(),
+                max_len=16,
+                min_len=3,
+                policy=policy,
+                disallow_prefixes=tuple(),
+                disallow_substrings=tuple(),
+                state=state,
+                schemes=schemes,
+                pools=pools,
+                history_n=1,
+                block_tokens=False,
+                attempts=5,
+            )
+
     def test_stream_generation_retries_after_transient_inner_failure(self) -> None:
         stream_key = b"\x06" * 32
         base36 = "0123456789abcdefghijklmnopqrstuvwxyz"

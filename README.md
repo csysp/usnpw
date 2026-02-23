@@ -1,16 +1,25 @@
-# USnPw
+# usnpw
 
-USnPw is a local, offline CLI for private credential generation.
-It supports:
-- strong password/secret generation
-- profile-aware username generation
+usnpw is a local only CLI for private credential generation.
+Designed around proven OS CSRNG for strong password/secret generation and it also includes a profile-aware, anti-fingerprint username generator. 
+Hardened by default it is single-user CLI only, stdlib-only, no API server, no GUI, no telemetry, no background network services.
 
-Current scope is intentionally small: single-user CLI only, stdlib-only, no API server, no GUI, no telemetry, no background network services.
+## Usage (Once Installed)
+```powershell
+# Passwords
+usnpw -n 5 -l 24
 
-## Safety Notice
-Do not use this project for illegal activity. You are responsible for your own use.
+# Usernames (hardened defaults)
+usnpw username -n 20 --profile reddit
 
-## Quick Start
+# Higher throughput (allows token reuse)
+usnpw username -n 200 --profile reddit --allow-token-reuse
+```
+
+## Supported Username Profiles
+`generic`, `reddit`, `x`, `github`, `discord`, `facebook`, `linkedin`, `instagram`, `pinterest`, `snapchat`, `telegram`, `tiktok`, `douyin`, `vk`, `youtube`
+
+## Quick Start (Python SC only)
 ```powershell
 # Windows (PowerShell)
 py -m venv .venv
@@ -33,20 +42,6 @@ python3 ./tools/release.py install-cli
 usnpw --help
 ```
 
-## Usage
-```powershell
-# Passwords
-usnpw -n 5 -l 24
-
-# Usernames (hardened defaults)
-usnpw username -n 20 --profile reddit
-
-# Higher throughput (allows token reuse)
-usnpw username -n 200 --profile reddit --allow-token-reuse
-```
-
-## Supported Username Profiles
-`generic`, `reddit`, `x`, `github`, `discord`, `facebook`, `linkedin`, `instagram`, `pinterest`, `snapchat`, `telegram`, `tiktok`, `douyin`, `vk`, `youtube`
 
 ## Core Entrypoints
 | Path | Purpose |
