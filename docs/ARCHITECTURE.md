@@ -1,7 +1,6 @@
 # Architecture
 
 USnPw is a local-only CLI system with strict service boundaries.
-The architecture intentionally favors auditability over abstraction depth.
 
 ## Architecture View
 
@@ -67,20 +66,3 @@ flowchart LR
 | `usnpw/core/username_uniqueness.py` | Token extraction and repeat checks |
 | `usnpw/core/username_stream_state.py` | Stateless stream tag derivation helpers |
 
-## Editorial Style
-Use this writing style when editing architecture docs.
-
-1. Lead with boundaries first, not implementation trivia.
-2. Use active voice and present tense.
-3. Prefer short claims that are testable in code.
-4. State security/privacy intent when describing behavior.
-5. Use path-based references for every architectural claim.
-6. Separate stable design from evolving implementation details.
-7. Keep diagrams synchronized with module boundaries after refactors.
-
-## Explicitly Removed
-- API server surface
-- GUI surface
-- container distribution files
-- username/token persistence ledgers
-- stream-state persistence files and locking pathways
