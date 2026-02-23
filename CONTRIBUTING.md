@@ -1,7 +1,7 @@
 # Contributing
 
 ## Scope
-Keep contributions minimal, auditable, and stdlib-first. Preserve hardened defaults and OPSEC posture. Avoid new dependencies unless clearly justified and reviewed.
+Keep contributions minimal, auditable, and stdlib-first. Preserve hardened defaults and OPSEC posture. Avoid dependencies.
 
 ## Development Workflow
 1. Create a focused branch.
