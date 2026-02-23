@@ -2,9 +2,10 @@
 
 ## Supported Scope
 Security support applies to the latest `main` branch and latest tagged release artifacts.
+Reports are taken seriously, false or fully AI generated submissions will be blocked and banned 
 
 ## Reporting a Vulnerability
-Do not open public issues for unpatched vulnerabilities. Report privately through the hosting platform's security reporting channel and include affected component, impact, reproduction steps, and a proposed fix if available.
+Do not open public issues for unpatched vulnerabilities. Report privately via our email and include affected component, impact, reproduction steps, and a proposed fix if available.
 
 ## Handling Process
 Reports are acknowledged promptly, triaged by severity, fixed with tests and release notes, and disclosed publicly after a patch is available.
