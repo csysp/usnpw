@@ -11,9 +11,7 @@ import shutil
 import subprocess
 import sys
 import unittest
-import zipfile
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Sequence
 
@@ -21,27 +19,8 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DIST_DIR = ROOT / "dist"
 PYINSTALLER_REQUIRED_VERSION = "6.16.0"
 
-COMPILE_ROOTS: tuple[str, ...] = ("scripts", "usnpw", "tools")
+COMPILE_ROOTS: tuple[str, ...] = ("usnpw", "tools")
 TESTS_ROOT = ROOT / "tests"
-
-RELEASE_GLOBS: tuple[str, ...] = (
-    "AGENTS.md",
-    "CODE_OF_CONDUCT.md",
-    "CONTRIBUTING.md",
-    "Dockerfile",
-    "LICENSE",
-    "README.md",
-    "SECURITY.md",
-    ".dockerignore",
-    ".github/workflows/*.yml",
-    "bip39_english.txt",
-    "docker-compose*.yml",
-    "docs/**/*.md",
-    "scripts/**/*.py",
-    "usnpw/**/*.py",
-    "tests/**/*.py",
-    "tools/*.py",
-)
 
 
 @dataclass(frozen=True)
@@ -55,17 +34,14 @@ class BinaryTarget:
 
 
 BINARY_TARGETS: tuple[BinaryTarget, ...] = (
-    BinaryTarget(key="gui", entrypoint="scripts/usnpw_gui.py", output_base="usnpw-{platform}-gui", windowed=True),
     BinaryTarget(
         key="cli",
         entrypoint="usnpw/cli/usnpw_cli.py",
         output_base="usnpw-{platform}-cli",
         collect_submodules=("usnpw.cli", "usnpw.core"),
     ),
-    BinaryTarget(key="pwgen", entrypoint="scripts/pwgen.py", output_base="usnpw-pwgen"),
-    BinaryTarget(key="username", entrypoint="scripts/opsec_username_gen.py", output_base="usnpw-username"),
 )
-DEFAULT_BINARY_TARGETS: tuple[str, ...] = ("gui", "cli")
+DEFAULT_BINARY_TARGETS: tuple[str, ...] = ("cli",)
 
 
 def _binary_target_map() -> dict[str, BinaryTarget]:
@@ -84,10 +60,6 @@ def _resolve_output_base(target: BinaryTarget) -> str:
     return target.output_base.format(platform=_host_platform_tag())
 
 
-def _rel(path: Path) -> str:
-    return path.relative_to(ROOT).as_posix()
-
-
 def discover_compile_targets() -> tuple[str, ...]:
     targets: set[str] = set()
     for rel_root in COMPILE_ROOTS:
@@ -98,7 +70,7 @@ def discover_compile_targets() -> tuple[str, ...]:
             if "__pycache__" in path.parts:
                 continue
             if path.is_file():
-                targets.add(_rel(path))
+                targets.add(path.relative_to(ROOT).as_posix())
     return tuple(sorted(targets))
 
 
@@ -142,32 +114,6 @@ def run_preflight() -> int:
     return 0 if result.wasSuccessful() else 1
 
 
-def release_files() -> list[Path]:
-    out: dict[str, Path] = {}
-    for pattern in RELEASE_GLOBS:
-        for path in ROOT.glob(pattern):
-            if not path.is_file():
-                continue
-            if "__pycache__" in path.parts:
-                continue
-            rel = _rel(path)
-            out[rel] = path
-    return [out[k] for k in sorted(out)]
-
-
-def build_bundle(dist_dir: Path) -> Path:
-    dist_dir.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%SZ")
-    artifact = dist_dir / f"usnpw-source-{stamp}.zip"
-    files = release_files()
-    with zipfile.ZipFile(artifact, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
-        for path in files:
-            zf.write(path, arcname=_rel(path))
-    print(f"[bundle] wrote {artifact}")
-    print(f"[bundle] files: {len(files)}")
-    return artifact
-
-
 def sha256_file(path: Path) -> str:
     h = hashlib.sha256()
     with path.open("rb") as handle:
@@ -176,29 +122,10 @@ def sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
-def sha256_tree(path: Path) -> str:
-    h = hashlib.sha256()
-    files = sorted(p for p in path.rglob("*") if p.is_file())
-    for file_path in files:
-        rel = file_path.relative_to(path).as_posix().encode("utf-8")
-        h.update(rel)
-        h.update(b"\0")
-        with file_path.open("rb") as handle:
-            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-                h.update(chunk)
-    return h.hexdigest()
-
-
-def sha256_path(path: Path) -> str:
-    if path.is_file():
-        return sha256_file(path)
-    if path.is_dir():
-        return sha256_tree(path)
-    raise ValueError(f"artifact path must be file or directory: {path}")
-
-
 def write_checksum(artifact: Path) -> Path:
-    digest = sha256_path(artifact)
+    if not artifact.is_file():
+        raise ValueError(f"artifact path must be a file: {artifact}")
+    digest = sha256_file(artifact)
     sidecar = artifact.with_suffix(artifact.suffix + ".sha256")
     sidecar.write_text(f"{digest} *{artifact.name}\n", encoding="utf-8")
     print(f"[checksums] sha256={digest}")
@@ -238,30 +165,12 @@ def _resolve_pyinstaller() -> list[str]:
 def _target_artifact_path(bin_dir: Path, output_base: str) -> Path | None:
     candidates = (
         bin_dir / f"{output_base}.exe",
-        bin_dir / f"{output_base}.app",
         bin_dir / output_base,
     )
     for candidate in candidates:
         if candidate.exists():
             return candidate
     return None
-
-
-def _zip_app_bundle(app_path: Path) -> Path:
-    if not app_path.is_dir() or app_path.suffix != ".app":
-        raise ValueError(f"expected .app directory bundle, got: {app_path}")
-    archive = app_path.with_suffix(app_path.suffix + ".zip")
-    if archive.exists():
-        if archive.is_file():
-            archive.unlink()
-        else:
-            raise ValueError(f"cannot overwrite non-file archive path: {archive}")
-    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
-        for file_path in sorted(p for p in app_path.rglob("*") if p.is_file()):
-            arcname = f"{app_path.name}/{file_path.relative_to(app_path).as_posix()}"
-            zf.write(file_path, arcname=arcname)
-    shutil.rmtree(app_path)
-    return archive
 
 
 def build_binaries(dist_dir: Path, target_keys: Sequence[str]) -> list[Path]:
@@ -318,8 +227,11 @@ def build_binaries(dist_dir: Path, target_keys: Sequence[str]) -> list[Path]:
             raise RuntimeError(
                 f"expected binary artifact not found for target '{target.key}' ({output_base})"
             )
-        if artifact.is_dir() and artifact.suffix == ".app":
-            artifact = _zip_app_bundle(artifact)
+        if artifact.is_dir():
+            raise RuntimeError(
+                f"expected one-file binary artifact, got directory: {artifact}. "
+                "CLI release mode only supports single executable artifacts."
+            )
         print(f"[binaries] wrote {artifact}")
         artifacts.append(artifact)
 
@@ -443,7 +355,7 @@ def install_cli_binary(
     shutil.copy2(src, dest)
     if os.name != "nt":
         dest.chmod(dest.stat().st_mode | 0o111)
-    digest = sha256_path(dest)
+    digest = sha256_file(dest)
     dest_sidecar = dest.with_suffix(dest.suffix + ".sha256")
     dest_sidecar.write_text(f"{digest} *{dest.name}\n", encoding="utf-8")
     print(f"[install-cli] wrote {dest_sidecar}")
@@ -474,14 +386,11 @@ def install_cli_binary(
 
 def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="USnPw Phase 4 release helper (preflight, bundle, checksums, binaries, install-cli)."
+        description="USnPw release helper (preflight, binaries, install-cli)."
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("preflight", help="Run compile + unit test checks.")
-
-    bundle = sub.add_parser("bundle", help="Build source artifact zip in dist directory.")
-    bundle.add_argument("--dist-dir", default=str(DEFAULT_DIST_DIR))
 
     checksums = sub.add_parser("checksums", help="Write .sha256 sidecar for an artifact.")
     checksums.add_argument("--artifact", required=True)
@@ -492,7 +401,7 @@ def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
         "--target",
         action="append",
         choices=[t.key for t in BINARY_TARGETS],
-        help="Binary target to build (repeat flag). Default: gui + cli targets.",
+        help="Binary target to build (repeat flag). Default: cli target.",
     )
     binaries.add_argument(
         "--no-checksums",
@@ -519,18 +428,18 @@ def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
         help="Install binary without modifying persistent user PATH.",
     )
 
-    all_cmd = sub.add_parser("all", help="Run preflight, then bundle, then checksums.")
+    all_cmd = sub.add_parser("all", help="Run preflight, then build CLI binaries and checksums.")
     all_cmd.add_argument("--dist-dir", default=str(DEFAULT_DIST_DIR))
-    all_cmd.add_argument(
-        "--with-binaries",
-        action="store_true",
-        help="Also build host-native binaries and checksums (requires PyInstaller).",
-    )
     all_cmd.add_argument(
         "--binary-target",
         action="append",
         choices=[t.key for t in BINARY_TARGETS],
-        help="When used with --with-binaries, restrict binaries to these targets.",
+        help="Restrict binaries to these targets.",
+    )
+    all_cmd.add_argument(
+        "--no-checksums",
+        action="store_true",
+        help="Skip writing .sha256 files for built binaries.",
     )
 
     return parser.parse_args(argv)
@@ -543,9 +452,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if command == "preflight":
             return run_preflight()
-        if command == "bundle":
-            build_bundle(Path(args.dist_dir))
-            return 0
         if command == "checksums":
             artifact = Path(args.artifact).expanduser()
             if not artifact.is_file():
@@ -575,11 +481,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             if rc != 0:
                 return rc
             dist_dir = Path(args.dist_dir).expanduser()
-            artifact = build_bundle(dist_dir)
-            write_checksum(artifact)
-            if args.with_binaries:
-                target_keys = tuple(args.binary_target or DEFAULT_BINARY_TARGETS)
-                binary_artifacts = build_binaries(dist_dir, target_keys=target_keys)
+            target_keys = tuple(args.binary_target or DEFAULT_BINARY_TARGETS)
+            binary_artifacts = build_binaries(dist_dir, target_keys=target_keys)
+            if not args.no_checksums:
                 write_checksums(binary_artifacts)
             return 0
     except (OSError, ValueError, RuntimeError, py_compile.PyCompileError) as exc:

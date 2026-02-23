@@ -19,18 +19,6 @@ def _print_env() -> None:
     print(f"[env] python={sys.version.split()[0]} exe={sys.executable}")
     print(f"[env] os.name={os.name} platform={sys.platform}")
 
-    dockerfile = ROOT / "Dockerfile"
-    if dockerfile.is_file():
-        text = dockerfile.read_text(encoding="utf-8", errors="ignore")
-        base = ""
-        for line in text.splitlines():
-            line = line.strip()
-            if line.startswith("FROM "):
-                base = line.split(None, 1)[1]
-                break
-        if base:
-            print(f"[env] docker_base={base}")
-
 
 def _maybe_run_external_scanners() -> int:
     # Best-effort only: keep stdlib-only project constraints; do not auto-install tooling.
@@ -42,8 +30,6 @@ def _maybe_run_external_scanners() -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Local security audit runner (stdlib-only).")
-    parser.add_argument("--fuzz-iterations", type=int, default=5000)
-    parser.add_argument("--fuzz-seed", type=int, default=0)
     parser.add_argument(
         "--allow-ci",
         action="store_true",
@@ -70,29 +56,6 @@ def main(argv: list[str] | None = None) -> int:
 
     steps: list[tuple[str, list[str]]] = [
         ("preflight", [sys.executable, "tools/release.py", "preflight"]),
-        (
-            "fuzz_gui_adapters",
-            [
-                sys.executable,
-                "tools/fuzz_gui_adapters.py",
-                "--iterations",
-                str(args.fuzz_iterations),
-                "--seed",
-                str(args.fuzz_seed),
-            ],
-        ),
-        (
-            "fuzz_api_adapters",
-            [
-                sys.executable,
-                "tools/fuzz_api_adapters.py",
-                "--iterations",
-                str(args.fuzz_iterations),
-                "--seed",
-                str(args.fuzz_seed),
-            ],
-        ),
-        ("pentest_api", [sys.executable, "tools/pentest_api.py"]),
     ]
 
     for name, cmd in steps:

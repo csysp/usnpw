@@ -3,23 +3,19 @@ from __future__ import annotations
 import re
 import subprocess
 import sys
-import os
-import time
 import unittest
+from unittest.mock import patch
 
 from usnpw.core.password_engine import generate_password
-from pathlib import Path
 
 from usnpw.core import (
     username_generation,
     username_lexicon,
     username_schemes,
-    username_storage,
     username_stream_state,
     username_uniqueness,
 )
 from usnpw.core.username_generation import normalize_for_platform
-from usnpw.core.username_stream_state import StreamStateLock, release_stream_state_lock
 from usnpw.core.username_policies import PLATFORM_POLICIES, PlatformPolicy
 
 
@@ -161,6 +157,148 @@ class CoreSmokeTests(unittest.TestCase):
         self.assertTrue(username)
         self.assertGreater(stream_counter, start_counter)
 
+    def test_stream_generation_is_unique_with_duplicate_guard_at_small_max_len(self) -> None:
+        stream_key = b"\x03" * 32
+        base36 = "0123456789abcdefghijklmnopqrstuvwxyz"
+        tag_map = {ch: ch for ch in base36}
+
+        policy = PLATFORM_POLICIES["reddit"]
+
+        def _fixed_builder(state, pools, history_n):  # type: ignore[no-untyped-def]
+            del state, pools, history_n
+            return "a", "", "lower", {"a"}
+
+        pools = username_lexicon.RunPools(
+            adjectives=["a"],
+            nouns=["a"],
+            verbs=["a"],
+            pseudos=["a"],
+            tags=["a"],
+        )
+        schemes = [username_schemes.Scheme("fixed", 1.0, _fixed_builder)]
+        state = username_schemes.GenState(
+            recent_schemes=[],
+            recent_seps=[],
+            recent_case_styles=[],
+            scheme_counts={},
+            total_target=1000,
+            max_scheme_pct=1.0,
+        )
+
+        seen: set[str] = set()
+        counter = 0
+        for _ in range(1000):
+            before = len(seen)
+            username, _, _, _, _, counter = username_generation.generate_stream_unique(
+                stream_key=stream_key,
+                stream_tag_map=tag_map,
+                stream_counter=counter,
+                token_blacklist=set(),
+                max_len=3,
+                min_len=3,
+                policy=policy,
+                disallow_prefixes=tuple(),
+                disallow_substrings=tuple(),
+                state=state,
+                schemes=schemes,
+                pools=pools,
+                history_n=1,
+                block_tokens=False,
+                attempts=200,
+                existing_username_keys=seen,
+            )
+            self.assertIn(username, seen)
+            self.assertEqual(len(seen), before + 1)
+        self.assertEqual(len(seen), 1000)
+
+    def test_stream_generation_rejects_unrepresentable_counter_space(self) -> None:
+        stream_key = b"\x04" * 32
+        base36 = "0123456789abcdefghijklmnopqrstuvwxyz"
+        tag_map = {ch: ch for ch in base36}
+        policy = PLATFORM_POLICIES["reddit"]
+
+        pools = username_lexicon.RunPools(
+            adjectives=["able"],
+            nouns=["node"],
+            verbs=["build"],
+            pseudos=["keko"],
+            tags=["xx"],
+        )
+        schemes = [username_schemes.Scheme("adj_noun", 1.0, username_schemes.scheme_adj_noun)]
+        state = username_schemes.GenState(
+            recent_schemes=[],
+            recent_seps=[],
+            recent_case_styles=[],
+            scheme_counts={},
+            total_target=1,
+            max_scheme_pct=1.0,
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "exceeded representable space"):
+            username_generation.generate_stream_unique(
+                stream_key=stream_key,
+                stream_tag_map=tag_map,
+                stream_counter=36**3,
+                token_blacklist=set(),
+                max_len=3,
+                min_len=3,
+                policy=policy,
+                disallow_prefixes=tuple(),
+                disallow_substrings=tuple(),
+                state=state,
+                schemes=schemes,
+                pools=pools,
+                history_n=1,
+                block_tokens=False,
+                attempts=10,
+            )
+
+    def test_stream_generation_rechecks_repeated_patterns_after_tagging(self) -> None:
+        stream_key = b"\x05" * 32
+        base36 = "0123456789abcdefghijklmnopqrstuvwxyz"
+        tag_map = {ch: ch for ch in base36}
+        policy = PLATFORM_POLICIES["reddit"]
+
+        pools = username_lexicon.RunPools(
+            adjectives=["able"],
+            nouns=["node"],
+            verbs=["build"],
+            pseudos=["keko"],
+            tags=["xx"],
+        )
+        schemes = [username_schemes.Scheme("adj_noun", 1.0, username_schemes.scheme_adj_noun)]
+        state = username_schemes.GenState(
+            recent_schemes=[],
+            recent_seps=[],
+            recent_case_styles=[],
+            scheme_counts={},
+            total_target=1,
+            max_scheme_pct=1.0,
+        )
+
+        with (
+            patch("usnpw.core.username_generation.stream_state.stream_tag", return_value="axis"),
+            patch("usnpw.core.username_generation.uniqueness.apply_stream_tag", return_value="axisaxis"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "stream-unique username"):
+                username_generation.generate_stream_unique(
+                    stream_key=stream_key,
+                    stream_tag_map=tag_map,
+                    stream_counter=0,
+                    token_blacklist=set(),
+                    max_len=16,
+                    min_len=3,
+                    policy=policy,
+                    disallow_prefixes=tuple(),
+                    disallow_substrings=tuple(),
+                    state=state,
+                    schemes=schemes,
+                    pools=pools,
+                    history_n=1,
+                    block_tokens=False,
+                    attempts=3,
+                )
+
     def test_core_package_import_is_lightweight(self) -> None:
         probe = (
             "import sys; import usnpw.core; "
@@ -176,68 +314,13 @@ class CoreSmokeTests(unittest.TestCase):
         lines = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
         self.assertEqual(lines, ["0", "0"])
 
-    def test_release_stream_lock_respects_owner_token(self) -> None:
-        path = Path(".tmp_test_state.json.lock")
-        try:
-            with path.open("wb+") as handle:
-                handle.write(b"123 0 token-a\n")
-                handle.flush()
-                fd = os.dup(handle.fileno())
-            lock = StreamStateLock(path=path, fd=fd, owner_pid=123, owner_token="token-b")
-            release_stream_state_lock(lock)
-            self.assertTrue(path.exists(), "lock file with mismatched token should not be removed")
-        finally:
-            try:
-                path.unlink()
-            except OSError:
-                pass
-
-    def test_load_stream_state_rejects_oversize_file(self) -> None:
-        suffix = f"{os.getpid()}_{time.time_ns()}"
-        state_path = Path(f".tmp_stream_state_oversize_{suffix}.json")
-        try:
-            with state_path.open("wb") as handle:
-                handle.truncate(username_stream_state.MAX_STREAM_STATE_FILE_BYTES + 1)
-            with self.assertRaisesRegex(ValueError, "Stream state file too large"):
-                username_stream_state.load_or_init_stream_state(state_path, allow_plaintext=True)
-        finally:
-            try:
-                state_path.unlink()
-            except OSError:
-                pass
-
-    def test_acquire_stream_lock_reclaims_stale_file(self) -> None:
-        suffix = f"{os.getpid()}_{time.time_ns()}"
-        state_path = Path(f".tmp_stream_state_{suffix}.json")
-        lock_path = state_path.with_name(state_path.name + ".lock")
-        try:
-            lock_path.write_text(f"{os.getpid()} 0 stale-token\n", encoding="ascii")
-            stale_time = time.time() - 7200
-            os.utime(lock_path, (stale_time, stale_time))
-
-            lock = username_stream_state.acquire_stream_state_lock(state_path, timeout_sec=0.5)
-            try:
-                self.assertEqual(lock.path, lock_path)
-                token = lock_path.read_text(encoding="ascii").split()[2]
-                self.assertEqual(token, lock.owner_token)
-            finally:
-                username_stream_state.release_stream_state_lock(lock)
-
-            self.assertFalse(lock_path.exists())
-        finally:
-            for path in (state_path, lock_path):
-                try:
-                    path.unlink()
-                except OSError:
-                    pass
-
     def test_uniqueness_helpers_are_consistent(self) -> None:
         policy = PLATFORM_POLICIES["reddit"]
         normalize_token = username_lexicon.normalize_token
         tokens = username_uniqueness.extract_component_tokens("Alpha_Beta-123", normalize_token=normalize_token)
         self.assertEqual(tokens, {"alpha", "beta", "123"})
         self.assertTrue(username_uniqueness.has_repeated_component_pattern("axisaxis", normalize_token=normalize_token))
-        self.assertEqual(username_uniqueness.apply_stream_tag("samplecore", "abc", policy, 16, 3), "asamplbecorec")
+        self.assertEqual(username_uniqueness.apply_stream_tag("samplecore", "abc", policy, 16, 3), "samplecore-abc")
         self.assertIn("Token-block saturation reached", username_uniqueness.token_saturation_message(10, 7, 8))
 
     def test_lexicon_and_scheme_modules_are_consistent(self) -> None:
@@ -265,54 +348,6 @@ class CoreSmokeTests(unittest.TestCase):
         cap_high = username_schemes.max_token_block_count(pools, schemes, max_scheme_pct=0.80)
         self.assertEqual(cap_low, cap_high)
         self.assertGreaterEqual(cap_low, 12)
-
-    def test_generate_unique_respects_hashed_username_blacklist(self) -> None:
-        key = bytes.fromhex("01" * 32)
-        blocked = username_storage.hash_username_key("alpha", key)
-
-        def _fixed_builder(  # type: ignore[no-untyped-def]
-            state,
-            pools,
-            history_n,
-        ):
-            del state, pools, history_n
-            return "alpha", "", "lower", {"alpha"}
-
-        state = username_schemes.GenState(
-            recent_schemes=[],
-            recent_seps=[],
-            recent_case_styles=[],
-            scheme_counts={},
-            total_target=1,
-            max_scheme_pct=1.0,
-        )
-        pools = username_lexicon.RunPools(
-            adjectives=["alpha"],
-            nouns=["alpha"],
-            verbs=["alpha"],
-            pseudos=["alpha"],
-            tags=["alpha"],
-        )
-        schemes = [username_schemes.Scheme("fixed", 1.0, _fixed_builder)]
-
-        with self.assertRaisesRegex(RuntimeError, "Failed to generate a unique username"):
-            username_generation.generate_unique(
-                username_blacklist_keys={blocked},
-                token_blacklist=set(),
-                max_len=32,
-                min_len=1,
-                policy=PLATFORM_POLICIES["generic"],
-                disallow_prefixes=tuple(),
-                disallow_substrings=tuple(),
-                state=state,
-                schemes=schemes,
-                pools=pools,
-                history_n=1,
-                block_tokens=False,
-                attempts=5,
-                username_key_hasher=lambda value: username_storage.hash_username_key(value, key),
-            )
-
 
 if __name__ == "__main__":
     unittest.main()

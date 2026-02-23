@@ -1,16 +1,13 @@
 from __future__ import annotations
 
-import os
-import time
+import string
 import unittest
-from pathlib import Path
 from unittest.mock import patch
 
-from usnpw.core import username_storage
 from usnpw.core.models import PasswordRequest, UsernameRequest
 from usnpw.core.password_service import generate_passwords
-from usnpw.core.username_service import apply_safe_mode_overrides, generate_usernames
 from usnpw.core.username_lexicon import RunPools
+from usnpw.core.username_service import generate_usernames
 
 
 class ServiceLayerTests(unittest.TestCase):
@@ -42,455 +39,114 @@ class ServiceLayerTests(unittest.TestCase):
         )
         self.assertEqual(len(result.outputs), 2)
         for value in result.outputs:
-            self.assertEqual(len(value), 86)  # base64url for 64 bytes (no padding)
+            self.assertEqual(len(value), 86)
             self.assertRegex(value, r"^[A-Za-z0-9_-]+$")
 
     def test_username_service_count_validation(self) -> None:
         with self.assertRaisesRegex(ValueError, "count must be > 0"):
             generate_usernames(UsernameRequest(count=0))
 
-    def test_username_service_rejects_oversize_blacklist_file(self) -> None:
-        suffix = f"{os.getpid()}_{time.time_ns()}"
-        blacklist_path = Path(f".tmp_names_oversize_{suffix}.txt")
-        try:
-            with blacklist_path.open("wb") as handle:
-                handle.truncate(username_storage.MAX_LINESET_FILE_BYTES + 1)
-            request = UsernameRequest(
-                count=1,
-                min_len=5,
-                max_len=12,
-                profile="reddit",
-                uniqueness_mode="blacklist",
-                blacklist=str(blacklist_path),
-                no_save=True,
-                no_token_save=True,
-                no_token_block=True,
-            )
-            with self.assertRaisesRegex(ValueError, "username blacklist file is too large"):
-                generate_usernames(request)
-        finally:
-            try:
-                blacklist_path.unlink()
-            except OSError:
-                pass
-
-    def test_username_service_token_cap_does_not_hard_fail_on_soft_scheme_pct(self) -> None:
-        pools = RunPools(
-            adjectives=["a0", "a1", "a2", "a3"],
-            nouns=["n0", "n1", "n2"],
-            verbs=["v0", "v1", "v2", "v3", "v4"],
-            pseudos=[f"pseudo{i}" for i in range(20)],
-            tags=[f"tag{i}" for i in range(20)],
-        )
-        request = UsernameRequest(
-            count=8,
-            min_len=5,
-            max_len=20,
-            profile="reddit",
-            uniqueness_mode="blacklist",
-            no_save=True,
-            no_token_save=True,
-            no_token_block=False,
-            max_scheme_pct=0.10,
-        )
-
-        def _fake_generate_unique(  # type: ignore[no-untyped-def]
-            username_blacklist_keys,
-            token_blacklist,
-            max_len,
-            min_len,
-            policy,
-            disallow_prefixes,
-            disallow_substrings,
-            state,
-            schemes,
-            pools,
-            history_n,
-            block_tokens,
-            username_key_hasher=None,
-            attempts=80_000,
-            push_state=True,
-        ):
-            del username_blacklist_keys, policy, disallow_prefixes, disallow_substrings, state, schemes, history_n, attempts
-            del push_state, block_tokens, username_key_hasher
-            for token in pools.pseudos:
-                if token in token_blacklist:
-                    continue
-                username = token[:max_len]
-                if len(username) < min_len:
-                    continue
-                return username, "pseudoword_pair", "", "lower", {token}
-            raise RuntimeError("exhausted")
-
-        with (
-            patch("usnpw.core.username_service.username_lexicon.build_run_pools", return_value=pools),
-            patch("usnpw.core.username_service.username_generation.generate_unique", side_effect=_fake_generate_unique),
-        ):
-            result = generate_usernames(request)
-
-        self.assertEqual(len(result.records), 8)
-
     def test_username_service_generates_records(self) -> None:
         request = UsernameRequest(
-            count=5,
+            count=6,
             min_len=5,
             max_len=12,
             profile="telegram",
-            uniqueness_mode="blacklist",
-            blacklist=".tmp_nonexistent_blacklist.txt",
-            token_blacklist=".tmp_nonexistent_tokens.txt",
-            no_save=True,
-            no_token_save=True,
-            no_token_block=True,
         )
         result = generate_usernames(request)
-        self.assertEqual(len(result.records), 5)
+        self.assertEqual(len(result.records), 6)
         for row in result.records:
             self.assertGreaterEqual(len(row.username), 5)
             self.assertLessEqual(len(row.username), 12)
 
     def test_username_request_defaults_are_hardened(self) -> None:
         request = UsernameRequest()
-        self.assertEqual(request.uniqueness_mode, "stream")
-        self.assertTrue(request.no_save)
-        self.assertTrue(request.no_token_save)
-        self.assertTrue(request.stream_state_persist)
+        self.assertTrue(request.block_tokens)
         self.assertTrue(request.no_leading_digit)
         self.assertEqual(request.history, 10)
         self.assertEqual(request.pool_scale, 4)
         self.assertEqual(request.initials_weight, 0.0)
 
-    def test_stream_mode_non_windows_ephemeral_without_plaintext(self) -> None:
+    def test_username_service_is_stream_only_and_never_touches_state_files(self) -> None:
         request = UsernameRequest(
             count=2,
             min_len=5,
             max_len=12,
             profile="reddit",
-            uniqueness_mode="stream",
-            stream_state=".tmp_stream_state.json",
-            allow_plaintext_stream_state=False,
-            no_save=True,
-            no_token_save=True,
-            no_token_block=True,
         )
-        with (
-            patch("usnpw.core.username_service.os.name", "posix"),
-            patch("usnpw.core.username_service.username_stream_state.acquire_stream_state_lock") as lock_state,
-            patch("usnpw.core.username_service.username_stream_state.load_or_init_stream_state") as load_state,
-            patch("usnpw.core.username_service.username_stream_state.save_stream_state") as save_state,
-            patch("usnpw.core.username_service.username_stream_state.release_stream_state_lock") as release_lock,
-        ):
-            result = generate_usernames(request)
-
+        result = generate_usernames(request)
         self.assertEqual(len(result.records), 2)
-        lock_state.assert_not_called()
-        load_state.assert_not_called()
-        save_state.assert_not_called()
-        release_lock.assert_not_called()
 
-    def test_stream_mode_windows_ephemeral_when_persist_disabled(self) -> None:
+    def test_stream_mode_block_tokens_does_not_misreport_token_saturation(self) -> None:
+        impossible_prefixes = tuple(string.ascii_lowercase + string.digits)
         request = UsernameRequest(
-            count=2,
+            count=1,
+            min_len=8,
+            max_len=16,
+            profile="reddit",
+            disallow_prefix=impossible_prefixes,
+        )
+        with self.assertRaises(ValueError) as ctx:
+            generate_usernames(request)
+        msg = str(ctx.exception)
+        self.assertIn("Failed to generate a stream-unique username", msg)
+        self.assertNotIn("Token-block saturation reached", msg)
+
+    def test_token_specific_runtime_maps_to_saturation_message(self) -> None:
+        pools = RunPools(
+            adjectives=["able", "agile"],
+            nouns=["node", "token"],
+            verbs=["build", "trace"],
+            pseudos=["keko", "mavu"],
+            tags=["xx", "yy"],
+        )
+        request = UsernameRequest(
+            count=1,
             min_len=5,
             max_len=12,
             profile="reddit",
-            uniqueness_mode="stream",
-            stream_state=".tmp_stream_state.json",
-            stream_state_persist=False,
-            allow_plaintext_stream_state=False,
-            no_save=True,
-            no_token_save=True,
-            no_token_block=True,
+            block_tokens=True,
         )
+
         with (
-            patch("usnpw.core.username_service.os.name", "nt"),
-            patch("usnpw.core.username_service.username_stream_state.acquire_stream_state_lock") as lock_state,
-            patch("usnpw.core.username_service.username_stream_state.load_or_init_stream_state") as load_state,
-            patch("usnpw.core.username_service.username_stream_state.save_stream_state") as save_state,
-            patch("usnpw.core.username_service.username_stream_state.release_stream_state_lock") as release_lock,
+            patch("usnpw.core.username_service.username_lexicon.build_run_pools", return_value=pools),
+            patch(
+                "usnpw.core.username_service.username_generation.generate_stream_unique",
+                side_effect=RuntimeError("Token-block candidate space exhausted within attempt budget."),
+            ),
         ):
-            result = generate_usernames(request)
-
-        self.assertEqual(len(result.records), 2)
-        lock_state.assert_not_called()
-        load_state.assert_not_called()
-        save_state.assert_not_called()
-        release_lock.assert_not_called()
-
-    def test_blacklist_mode_save_acquires_and_releases_lock(self) -> None:
-        suffix = f"{os.getpid()}_{time.time_ns()}"
-        blacklist_path = Path(f".tmp_names_{suffix}.txt")
-        token_path = Path(f".tmp_tokens_{suffix}.txt")
-        try:
-            request = UsernameRequest(
-                count=2,
-                min_len=5,
-                max_len=12,
-                profile="reddit",
-                uniqueness_mode="blacklist",
-                blacklist=str(blacklist_path),
-                token_blacklist=str(token_path),
-                no_save=False,
-                no_token_save=True,
-                no_token_block=True,
-            )
-            lock_obj = object()
-            with (
-                patch(
-                    "usnpw.core.username_service.username_stream_state.acquire_stream_state_lock",
-                    return_value=lock_obj,
-                ) as acquire_lock,
-                patch("usnpw.core.username_service.username_stream_state.release_stream_state_lock") as release_lock,
-            ):
-                result = generate_usernames(request)
-
-            self.assertEqual(len(result.records), 2)
-            acquire_lock.assert_called_once_with(blacklist_path)
-            release_lock.assert_called_once_with(lock_obj)
-            self.assertTrue(blacklist_path.exists())
-        finally:
-            for path in (
-                blacklist_path,
-                token_path,
-                blacklist_path.with_name(blacklist_path.name + ".lock"),
-                token_path.with_name(token_path.name + ".lock"),
-            ):
-                try:
-                    path.unlink()
-                except OSError:
-                    pass
-
-    def test_blacklist_mode_no_save_skips_lock(self) -> None:
-        suffix = f"{os.getpid()}_{time.time_ns()}"
-        blacklist_path = Path(f".tmp_names_{suffix}.txt")
-        token_path = Path(f".tmp_tokens_{suffix}.txt")
-        try:
-            request = UsernameRequest(
-                count=2,
-                min_len=5,
-                max_len=12,
-                profile="reddit",
-                uniqueness_mode="blacklist",
-                blacklist=str(blacklist_path),
-                token_blacklist=str(token_path),
-                no_save=True,
-                no_token_save=True,
-                no_token_block=True,
-            )
-            with (
-                patch("usnpw.core.username_service.username_stream_state.acquire_stream_state_lock") as acquire_lock,
-                patch("usnpw.core.username_service.username_stream_state.release_stream_state_lock") as release_lock,
-            ):
-                result = generate_usernames(request)
-
-            self.assertEqual(len(result.records), 2)
-            acquire_lock.assert_not_called()
-            release_lock.assert_not_called()
-        finally:
-            for path in (
-                blacklist_path,
-                token_path,
-                blacklist_path.with_name(blacklist_path.name + ".lock"),
-                token_path.with_name(token_path.name + ".lock"),
-            ):
-                try:
-                    path.unlink()
-                except OSError:
-                    pass
-
-    def test_blacklist_mode_token_save_acquires_token_lock(self) -> None:
-        suffix = f"{os.getpid()}_{time.time_ns()}"
-        blacklist_path = Path(f".tmp_names_{suffix}.txt")
-        token_path = Path(f".tmp_tokens_{suffix}.txt")
-        try:
-            request = UsernameRequest(
-                count=2,
-                min_len=5,
-                max_len=12,
-                profile="reddit",
-                uniqueness_mode="blacklist",
-                blacklist=str(blacklist_path),
-                token_blacklist=str(token_path),
-                no_save=True,
-                no_token_save=False,
-                no_token_block=False,
-            )
-            token_lock = object()
-            with (
-                patch(
-                    "usnpw.core.username_service.username_stream_state.acquire_stream_state_lock",
-                    return_value=token_lock,
-                ) as acquire_lock,
-                patch("usnpw.core.username_service.username_stream_state.release_stream_state_lock") as release_lock,
-            ):
-                result = generate_usernames(request)
-
-            self.assertEqual(len(result.records), 2)
-            acquire_lock.assert_called_once_with(token_path)
-            release_lock.assert_called_once_with(token_lock)
-            self.assertTrue(token_path.exists())
-        finally:
-            for path in (
-                blacklist_path,
-                token_path,
-                blacklist_path.with_name(blacklist_path.name + ".lock"),
-                token_path.with_name(token_path.name + ".lock"),
-            ):
-                try:
-                    path.unlink()
-                except OSError:
-                    pass
-
-    def test_blacklist_mode_save_persists_hashed_usernames(self) -> None:
-        suffix = f"{os.getpid()}_{time.time_ns()}"
-        blacklist_path = Path(f".tmp_names_hashed_{suffix}.txt")
-        token_path = Path(f".tmp_tokens_hashed_{suffix}.txt")
-        key_path = username_storage.username_hash_key_path(blacklist_path)
-        try:
-            request = UsernameRequest(
-                count=4,
-                min_len=5,
-                max_len=12,
-                profile="reddit",
-                uniqueness_mode="blacklist",
-                blacklist=str(blacklist_path),
-                token_blacklist=str(token_path),
-                no_save=False,
-                no_token_save=True,
-                no_token_block=True,
-            )
-            result = generate_usernames(request)
-            self.assertEqual(len(result.records), 4)
-            self.assertTrue(key_path.exists())
-
-            entries = username_storage.load_lineset(blacklist_path, "username blacklist")
-            self.assertEqual(len(entries), 4)
-            for entry in entries:
-                self.assertTrue(entry.startswith(username_storage.USERNAME_HASH_PREFIX))
-                self.assertIsNotNone(username_storage.parse_hashed_username_entry(entry))
-        finally:
-            for path in (
-                blacklist_path,
-                token_path,
-                key_path,
-                blacklist_path.with_name(blacklist_path.name + ".lock"),
-                token_path.with_name(token_path.name + ".lock"),
-            ):
-                try:
-                    path.unlink()
-                except OSError:
-                    pass
-
-    def test_blacklist_mode_hashed_entries_require_key_file(self) -> None:
-        suffix = f"{os.getpid()}_{time.time_ns()}"
-        blacklist_path = Path(f".tmp_names_missing_key_{suffix}.txt")
-        token_path = Path(f".tmp_tokens_missing_key_{suffix}.txt")
-        try:
-            blacklist_path.write_text(
-                username_storage.USERNAME_HASH_PREFIX + ("0" * 64) + "\n",
-                encoding="utf-8",
-            )
-            request = UsernameRequest(
-                count=1,
-                min_len=5,
-                max_len=12,
-                profile="reddit",
-                uniqueness_mode="blacklist",
-                blacklist=str(blacklist_path),
-                token_blacklist=str(token_path),
-                no_save=True,
-                no_token_save=True,
-                no_token_block=True,
-            )
-            with self.assertRaisesRegex(ValueError, "hash key is available"):
+            with self.assertRaisesRegex(ValueError, "Token-block saturation reached before target count"):
                 generate_usernames(request)
-        finally:
-            for path in (
-                blacklist_path,
-                token_path,
-                username_storage.username_hash_key_path(blacklist_path),
-                blacklist_path.with_name(blacklist_path.name + ".lock"),
-                token_path.with_name(token_path.name + ".lock"),
-            ):
-                try:
-                    path.unlink()
-                except OSError:
-                    pass
 
-    def test_blacklist_mode_save_migrates_legacy_raw_entries(self) -> None:
-        suffix = f"{os.getpid()}_{time.time_ns()}"
-        blacklist_path = Path(f".tmp_names_migrate_{suffix}.txt")
-        token_path = Path(f".tmp_tokens_migrate_{suffix}.txt")
-        key_path = username_storage.username_hash_key_path(blacklist_path)
-        try:
-            username_storage.load_username_hash_key(blacklist_path, create_if_missing=True)
-            blacklist_path.write_text("AlphaUser\nBetaUser\n", encoding="utf-8")
-
-            request = UsernameRequest(
-                count=2,
-                min_len=5,
-                max_len=12,
-                profile="reddit",
-                uniqueness_mode="blacklist",
-                blacklist=str(blacklist_path),
-                token_blacklist=str(token_path),
-                no_save=False,
-                no_token_save=True,
-                no_token_block=True,
-            )
-            result = generate_usernames(request)
-            self.assertEqual(len(result.records), 2)
-
-            entries = username_storage.load_lineset(blacklist_path, "username blacklist")
-            self.assertGreaterEqual(len(entries), 2)
-            self.assertNotIn("alphauser", entries)
-            self.assertNotIn("betauser", entries)
-            for entry in entries:
-                self.assertTrue(entry.startswith(username_storage.USERNAME_HASH_PREFIX))
-                self.assertIsNotNone(username_storage.parse_hashed_username_entry(entry))
-            self.assertTrue(key_path.exists())
-        finally:
-            for path in (
-                blacklist_path,
-                token_path,
-                key_path,
-                blacklist_path.with_name(blacklist_path.name + ".lock"),
-                token_path.with_name(token_path.name + ".lock"),
-            ):
-                try:
-                    path.unlink()
-                except OSError:
-                    pass
-
-    def test_safe_mode_overrides(self) -> None:
-        original = UsernameRequest(
-            safe_mode=True,
-            uniqueness_mode="blacklist",
-            no_save=False,
-            no_token_save=False,
-            no_token_block=True,
-            stream_save_tokens=True,
-            allow_plaintext_stream_state=True,
-            no_leading_digit=False,
-            max_scheme_pct=0.5,
-            history=4,
-            pool_scale=2,
-            initials_weight=0.7,
-            show_meta=True,
+    def test_allow_token_reuse_disables_token_saturation_remap(self) -> None:
+        request = UsernameRequest(
+            count=1,
+            min_len=5,
+            max_len=12,
+            profile="reddit",
+            block_tokens=False,
         )
-        hardened = apply_safe_mode_overrides(original)
-        self.assertEqual(hardened.uniqueness_mode, "stream")
-        self.assertTrue(hardened.no_save)
-        self.assertTrue(hardened.no_token_save)
-        self.assertFalse(hardened.no_token_block)
-        self.assertFalse(hardened.stream_save_tokens)
-        self.assertFalse(hardened.allow_plaintext_stream_state)
-        self.assertTrue(hardened.no_leading_digit)
-        self.assertEqual(hardened.max_scheme_pct, 0.28)
-        self.assertEqual(hardened.history, 10)
-        self.assertEqual(hardened.pool_scale, 4)
-        self.assertEqual(hardened.initials_weight, 0.0)
-        self.assertFalse(hardened.show_meta)
+        with patch(
+            "usnpw.core.username_service.username_generation.generate_stream_unique",
+            side_effect=RuntimeError("Token-block candidate space exhausted within attempt budget."),
+        ):
+            with self.assertRaisesRegex(ValueError, "Token-block candidate space exhausted"):
+                generate_usernames(request)
+
+    def test_count_above_token_cap_fails_with_actionable_message(self) -> None:
+        request = UsernameRequest(
+            count=12,
+            min_len=5,
+            max_len=16,
+            profile="reddit",
+            block_tokens=True,
+        )
+        with patch(
+            "usnpw.core.username_service.username_schemes.max_token_block_count",
+            return_value=3,
+        ):
+            with self.assertRaisesRegex(ValueError, "--allow-token-reuse"):
+                generate_usernames(request)
 
 
 if __name__ == "__main__":

@@ -6,16 +6,11 @@ import sys
 
 from usnpw.core.error_dialect import format_error_text
 from usnpw.core.models import (
-    DEFAULT_USERNAME_BLACKLIST,
-    DEFAULT_USERNAME_TOKENS,
     USERNAME_DEFAULT_HISTORY,
     USERNAME_DEFAULT_INITIALS_WEIGHT,
     USERNAME_DEFAULT_MAX_SCHEME_PCT,
     USERNAME_DEFAULT_NO_LEADING_DIGIT,
-    USERNAME_DEFAULT_NO_SAVE,
-    USERNAME_DEFAULT_NO_TOKEN_SAVE,
     USERNAME_DEFAULT_POOL_SCALE,
-    USERNAME_DEFAULT_UNIQUENESS_MODE,
     UsernameRequest,
 )
 from usnpw.core.username_policies import PLATFORM_POLICIES
@@ -23,20 +18,11 @@ from usnpw.core.username_service import generate_usernames
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="OPSEC-focused random username generator.")
+    parser = argparse.ArgumentParser(description="Private, offline username generator.")
 
     parser.add_argument("-n", "--count", type=int, default=10, help="How many usernames to generate.")
-    parser.add_argument("--min-len", type=int, default=8, help="Minimum username length (re-roll if shorter).")
+    parser.add_argument("--min-len", type=int, default=8, help="Minimum username length.")
     parser.add_argument("--max-len", type=int, default=16, help="Maximum username length.")
-    parser.add_argument(
-        "--safe-mode",
-        action="store_true",
-        help=(
-            "Apply and lock recommended hardening defaults "
-            "(stream mode, no-save, no-token-save, no-leading-digit, "
-            "tuned anti-fingerprint knobs)."
-        ),
-    )
     parser.add_argument(
         "--profile",
         choices=sorted(PLATFORM_POLICIES.keys()),
@@ -44,84 +30,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Platform profile for canonicalization and length bounds.",
     )
     parser.add_argument(
-        "--uniqueness-mode",
-        choices=["blacklist", "stream"],
-        default=USERNAME_DEFAULT_UNIQUENESS_MODE,
-        help="blacklist = persistent historical list, stream = no name ledger (secret+counter state).",
-    )
-    parser.add_argument(
-        "--blacklist",
-        type=str,
-        default=DEFAULT_USERNAME_BLACKLIST,
-        help="Path to username blacklist file.",
-    )
-    parser.add_argument(
-        "--no-save",
-        dest="no_save",
-        action="store_true",
-        default=USERNAME_DEFAULT_NO_SAVE,
-        help="Do not write generated names to username blacklist (default: on).",
-    )
-    parser.add_argument(
-        "--save",
-        dest="no_save",
-        action="store_false",
-        help="Allow username blacklist persistence in blacklist mode.",
-    )
-
-    parser.add_argument(
-        "--token-blacklist",
-        type=str,
-        default=DEFAULT_USERNAME_TOKENS,
-        help="Path to token blacklist file (blocks reuse of components).",
-    )
-    parser.add_argument(
-        "--no-token-save",
-        dest="no_token_save",
-        action="store_true",
-        default=USERNAME_DEFAULT_NO_TOKEN_SAVE,
-        help="Do not write used tokens to token blacklist (default: on).",
-    )
-    parser.add_argument(
-        "--token-save",
-        dest="no_token_save",
-        action="store_false",
-        help="Allow token persistence to token blacklist.",
-    )
-    parser.add_argument("--no-token-block", action="store_true", help="Disable token blocking (not recommended).")
-    parser.add_argument(
-        "--stream-save-tokens",
-        action="store_true",
-        help="Allow token blacklist persistence in stream mode (disabled by default for lower artifact footprint).",
-    )
-    parser.add_argument(
-        "--stream-state",
-        type=str,
-        default="",
-        help="(stream mode) path to local stream state file. Default: ~/.opsec_username_stream_<profile>.json",
-    )
-    parser.add_argument(
-        "--no-stream-state-persist",
-        action="store_true",
-        help="(stream mode) force in-memory stream state for this run (no state-file persistence).",
-    )
-    parser.add_argument(
-        "--allow-plaintext-stream-state",
-        action="store_true",
-        help="Allow plaintext stream state storage when secure storage is unavailable (not recommended).",
-    )
-
-    parser.add_argument(
         "--disallow-prefix",
         action="append",
         default=[],
-        help="Disallow usernames starting with prefix.",
+        help="Disallow usernames starting with prefix (repeat flag to add more).",
     )
     parser.add_argument(
         "--disallow-substring",
         action="append",
         default=[],
-        help="Disallow usernames containing substring.",
+        help="Disallow usernames containing substring (repeat flag to add more).",
     )
     parser.add_argument(
         "--no-leading-digit",
@@ -136,7 +54,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_false",
         help="Allow usernames to start with digits.",
     )
-
     parser.add_argument(
         "--max-scheme-pct",
         type=float,
@@ -161,70 +78,26 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=USERNAME_DEFAULT_INITIALS_WEIGHT,
         help="Weight for initials_style scheme (0 disables it). Default 0.",
     )
+    parser.add_argument(
+        "--allow-token-reuse",
+        action="store_true",
+        help="Disable token blocking to increase throughput at the cost of output reuse.",
+    )
     parser.add_argument("--show-meta", action="store_true", help="Print scheme/sep/case metadata per username.")
 
     return parser.parse_args(argv)
-
-
-def validate_safe_mode_args(args: argparse.Namespace) -> None:
-    if not args.safe_mode:
-        return
-
-    conflicts: list[str] = []
-    if args.uniqueness_mode != USERNAME_DEFAULT_UNIQUENESS_MODE:
-        conflicts.append(f"--uniqueness-mode {args.uniqueness_mode}")
-    if not args.no_save:
-        conflicts.append("--save")
-    if not args.no_token_save:
-        conflicts.append("--token-save")
-    if args.no_token_block:
-        conflicts.append("--no-token-block")
-    if args.stream_save_tokens:
-        conflicts.append("--stream-save-tokens")
-    if args.allow_plaintext_stream_state:
-        conflicts.append("--allow-plaintext-stream-state")
-    if not args.no_leading_digit:
-        conflicts.append("--allow-leading-digit")
-    if args.max_scheme_pct != USERNAME_DEFAULT_MAX_SCHEME_PCT:
-        conflicts.append(f"--max-scheme-pct {args.max_scheme_pct}")
-    if args.history != USERNAME_DEFAULT_HISTORY:
-        conflicts.append(f"--history {args.history}")
-    if args.pool_scale != USERNAME_DEFAULT_POOL_SCALE:
-        conflicts.append(f"--pool-scale {args.pool_scale}")
-    if args.initials_weight != USERNAME_DEFAULT_INITIALS_WEIGHT:
-        conflicts.append(f"--initials-weight {args.initials_weight}")
-    if args.show_meta:
-        conflicts.append("--show-meta")
-
-    if conflicts:
-        joined = ", ".join(conflicts)
-        raise ValueError(
-            "safe-mode cannot be combined with conflicting options: "
-            f"{joined}. Remove conflicting options or disable --safe-mode."
-        )
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
 
     try:
-        validate_safe_mode_args(args)
         request = UsernameRequest(
             count=args.count,
             min_len=args.min_len,
             max_len=args.max_len,
             profile=args.profile,
-            safe_mode=args.safe_mode,
-            uniqueness_mode=args.uniqueness_mode,
-            blacklist=args.blacklist,
-            no_save=args.no_save,
-            token_blacklist=args.token_blacklist,
-            no_token_save=args.no_token_save,
-            no_token_block=args.no_token_block,
-            stream_save_tokens=args.stream_save_tokens,
-            stream_state=args.stream_state,
-            stream_state_persist=not args.no_stream_state_persist,
-            allow_plaintext_stream_state=args.allow_plaintext_stream_state,
+            block_tokens=not args.allow_token_reuse,
             disallow_prefix=tuple(args.disallow_prefix),
             disallow_substring=tuple(args.disallow_substring),
             no_leading_digit=args.no_leading_digit,

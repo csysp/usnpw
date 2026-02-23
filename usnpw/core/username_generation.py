@@ -10,6 +10,8 @@ from usnpw.core import username_stream_state as stream_state
 from usnpw.core import username_uniqueness as uniqueness
 from usnpw.core.username_policies import PlatformPolicy
 
+TOKEN_BLOCK_EXHAUSTION_ERROR = "Token-block candidate space exhausted within attempt budget."
+
 
 def _encode_counter_bytes(counter: int) -> bytes:
     if counter < 0:
@@ -65,26 +67,35 @@ def generate_unique(
         prefixes = tuple(p for p in disallow_prefixes if p)
         subs = tuple(sub for sub in disallow_substrings if sub)
 
+    saw_token_conflict = False
+    saw_non_token_rejection = False
+
     for _ in range(attempts):
         scheme = schemes_mod.pick_scheme(state, schemes)
         raw_u, sep_used, case_style_used, tokens_used = scheme.builder(state, pools, history_n)
 
         u = normalize_for_platform(raw_u, policy=policy, max_len=max_len)
         if not u or len(u) < min_len:
+            saw_non_token_rejection = True
             continue
         if uniqueness.has_repeated_component_pattern(u, normalize_token=lexicon.normalize_token):
+            saw_non_token_rejection = True
             continue
 
         ul = u.lower() if policy.case_insensitive else u
 
         if any(ul.startswith(p) for p in prefixes):
+            saw_non_token_rejection = True
             continue
         if any(sub in ul for sub in subs):
+            saw_non_token_rejection = True
             continue
         u_key = normalize_username_key(u, case_insensitive=policy.case_insensitive)
         if u_key in username_blacklist_keys:
+            saw_non_token_rejection = True
             continue
         if username_key_hasher is not None and username_key_hasher(u_key) in username_blacklist_keys:
+            saw_non_token_rejection = True
             continue
 
         # Block reusable component tokens (optional, but recommended)
@@ -94,6 +105,7 @@ def generate_unique(
             all_toks = set(tokens_used) | comp_toks
             # if ANY token already blacklisted, reject
             if any(t in token_blacklist for t in all_toks if t):
+                saw_token_conflict = True
                 continue
         else:
             all_toks = set()
@@ -101,6 +113,9 @@ def generate_unique(
         if push_state:
             state.push(scheme.name, sep_used, case_style_used, history_n)
         return u, scheme.name, sep_used, case_style_used, all_toks
+
+    if block_tokens and saw_token_conflict and not saw_non_token_rejection:
+        raise RuntimeError(TOKEN_BLOCK_EXHAUSTION_ERROR)
 
     raise RuntimeError(
         "Failed to generate a unique username within attempt budget. "
@@ -124,6 +139,8 @@ def generate_stream_unique(
     history_n: int,
     block_tokens: bool,
     attempts: int = 2000,
+    *,
+    existing_username_keys: Set[str] | None = None,
 ) -> Tuple[str, str, str, str, Set[str], int]:
     if stream_counter < 0:
         raise ValueError("stream counter must be non-negative")
@@ -156,13 +173,20 @@ def generate_stream_unique(
         counter_bytes = _encode_counter_bytes(stream_counter)
         layout_digest = hmac.new(stream_key, b"layout:" + counter_bytes, hashlib.sha256).digest()
         tag = stream_state.stream_tag(stream_tag_map, stream_counter, scramble_key=stream_key)
+        if len(tag) > max_len:
+            raise RuntimeError(
+                "Stream counter exceeded representable space for max_len. "
+                "Increase --max-len or start a new run."
+            )
         stream_counter += 1
 
         u = uniqueness.apply_stream_tag(base_u, tag, policy, max_len=max_len, selector=layout_digest[0])
         u = normalize_for_platform(u, policy=policy, max_len=max_len)
         if not u or len(u) < min_len:
             continue
-        if not uniqueness.contains_subsequence(u, tag):
+        if tag not in u:
+            continue
+        if uniqueness.has_repeated_component_pattern(u, normalize_token=lexicon.normalize_token):
             continue
 
         cmp_u = u.lower() if policy.case_insensitive else u
@@ -172,7 +196,13 @@ def generate_stream_unique(
         if any(s in cmp_u for s in subs):
             continue
 
+        u_key = normalize_username_key(u, case_insensitive=policy.case_insensitive)
+        if existing_username_keys is not None and u_key in existing_username_keys:
+            continue
+
         state.push(scheme_name, sep_used, case_style_used, history_n)
+        if existing_username_keys is not None:
+            existing_username_keys.add(u_key)
         return u, scheme_name, sep_used, case_style_used, used_tokens, stream_counter
 
     raise RuntimeError(
@@ -182,6 +212,7 @@ def generate_stream_unique(
 
 
 __all__ = [
+    "TOKEN_BLOCK_EXHAUSTION_ERROR",
     "normalize_for_platform",
     "normalize_username_key",
     "generate_unique",

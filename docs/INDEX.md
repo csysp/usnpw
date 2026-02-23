@@ -13,10 +13,8 @@ Use this page as the routing map for USnPw documentation.
 |---|---|
 | `docs/ADVANCED_USAGE.md` | OPSEC tuning, batch strategy, and troubleshooting |
 | `docs/ARCHITECTURE.md` | Module boundaries and service contracts |
-| `docs/DOCKER_CHECKLIST.md` | Docker and GHCR delivery checklist |
 | `docs/PERFORMANCE.md` | Baseline performance and benchmarking notes |
-| `docs/RELEASE_SIGNING.md` | Artifact and container signing workflow |
-| `docs/STREAM_STATE.md` | Stream uniqueness state behavior and recovery |
+| `docs/RELEASE_SIGNING.md` | Artifact signing and checksum verification workflow |
 
 ## Policy and Governance
 | File | Purpose |

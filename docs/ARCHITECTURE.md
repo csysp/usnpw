@@ -1,39 +1,41 @@
 # Architecture
 
-## Top-Level Layout
-| Path | Purpose |
+USnPw is now a CLI-only codebase.
+
+## Entrypoints
+| Path | Role |
 |---|---|
-| `scripts/pwgen.py`, `scripts/opsec_username_gen.py`, `scripts/usnpw_cli.py`, `scripts/usnpw_gui.py` | Compatibility entrypoints |
-| `scripts/usnpw_api.py` | Compatibility entrypoint for stdlib HTTP API server |
-| `usnpw/__main__.py` | Package entrypoint (`py -m usnpw`) |
-| `usnpw/cli/*` | Argument parsing and command execution |
-| `usnpw/gui/*` | Tkinter UI and request adapters |
-| `usnpw/api/*` | Thin network adapter for private-network use |
-| `usnpw/core/*` | Reusable generation, policy, storage, and crypto services |
-| `tests/*` | Stdlib unit tests |
-| `tools/release.py` | Preflight and release automation |
+| `usnpw` | Installed CLI command |
+| `usnpw/cli/usnpw_cli.py` | Unified CLI router |
 
-## Core Module Fleet
-| Module | Responsibility |
+## CLI Layer
+| Path | Role |
 |---|---|
-| `password_engine.py` | Low-level password/token primitives |
-| `password_service.py` | Password request validation and orchestration |
-| `username_lexicon.py` | Token pools and run-pool construction |
-| `username_schemes.py` | Scheme logic and token-cap computations |
-| `username_generation.py` | Unique and stream-unique generation pipelines |
-| `username_uniqueness.py` | Anti-pattern checks, tag layout, saturation messaging |
-| `username_stream_state.py` | Stream-state locking, persistence, and scrambling |
-| `username_storage.py` | Blacklist and token persistence helpers |
-| `username_policies.py` | Per-platform normalization and policy definitions |
-| `export_crypto.py` | Encrypted export transforms |
-| `dpapi.py` | Windows DPAPI wrappers |
-| `models.py` | Typed request and response contracts |
-| `services.py` | Public convenience exports |
-| `api/adapters.py` | Strict JSON mapping and hardened API defaults |
-| `api/server.py` | `ThreadingHTTPServer` API adapter over service layer |
+| `usnpw/cli/usnpw_cli.py` | Subcommand router (`password`, `username`) |
+| `usnpw/cli/pwgen_cli.py` | Password argument parsing |
+| `usnpw/cli/opsec_username_cli.py` | Username argument parsing |
 
-## Boundary Rules
-`core/*` is reusable library surface. CLI, GUI, and API layers should map inputs and outputs only, without duplicating generation logic. Stream state, persistence, and uniqueness logic remain separated to keep failure domains explicit and testable.
+## Service Layer
+| Path | Role |
+|---|---|
+| `usnpw/core/password_service.py` | Password request validation + orchestration |
+| `usnpw/core/username_service.py` | In-memory stream-only username orchestration |
+| `usnpw/core/models.py` | Typed request/response contracts |
 
-## Validation Gate
-Primary gate: `py .\tools\release.py preflight` (compile checks and unit tests).
+## Generation Primitives
+| Path | Role |
+|---|---|
+| `usnpw/core/password_engine.py` | Secret generation primitives |
+| `usnpw/core/username_generation.py` | Candidate generation and stream tagging |
+| `usnpw/core/username_lexicon.py` | Token pools and run subsets |
+| `usnpw/core/username_schemes.py` | Scheme definitions and balancing |
+| `usnpw/core/username_policies.py` | Platform normalization policies |
+| `usnpw/core/username_uniqueness.py` | Token extraction and repeat checks |
+| `usnpw/core/username_stream_state.py` | Stateless stream tag derivation helpers |
+
+## Explicitly Removed
+- API server surface
+- GUI surface
+- container distribution files
+- username/token persistence ledgers
+- stream-state persistence files and locking pathways

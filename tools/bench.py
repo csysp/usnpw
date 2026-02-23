@@ -24,28 +24,20 @@ def _bench_passwords(count: int, length: int) -> None:
     print(f"[passwords] count={len(result.outputs)} length={length} seconds={dt:.4f} rate={rate:.1f}/s")
 
 
-def _bench_usernames(count: int, profile: str, uniqueness_mode: str) -> None:
-    # Benchmark posture: avoid persistence and disable token blocking to prevent saturation in large runs.
+def _bench_usernames(count: int, profile: str, allow_token_reuse: bool) -> None:
     req = UsernameRequest(
         count=count,
         profile=profile,
-        uniqueness_mode=uniqueness_mode,
-        safe_mode=False,
-        no_save=True,
-        no_token_save=True,
-        no_token_block=True,
-        stream_save_tokens=False,
-        stream_state_persist=False,
-        stream_state="",
-        allow_plaintext_stream_state=False,
+        block_tokens=not allow_token_reuse,
         show_meta=False,
     )
     t0 = time.perf_counter()
     result = generate_usernames(req)
     dt = time.perf_counter() - t0
     rate = (len(result.records) / dt) if dt > 0 else 0.0
+    mode = "token-reuse" if allow_token_reuse else "token-block"
     print(
-        f"[usernames] count={len(result.records)} profile={profile} mode={uniqueness_mode} "
+        f"[usernames] count={len(result.records)} profile={profile} mode={mode} "
         f"seconds={dt:.4f} rate={rate:.1f}/s"
     )
 
@@ -57,11 +49,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--usernames", type=int, default=0, help="Number of usernames to generate.")
     parser.add_argument("--profile", type=str, default="reddit", help="Username profile for username bench.")
     parser.add_argument(
-        "--uniqueness-mode",
-        type=str,
-        default="stream",
-        choices=("stream", "blacklist"),
-        help="Username uniqueness mode for bench.",
+        "--allow-token-reuse",
+        action="store_true",
+        help="Disable token blocking for higher-throughput benchmarking.",
     )
     args = parser.parse_args(argv)
 
@@ -71,7 +61,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.passwords > 0:
         _bench_passwords(count=args.passwords, length=args.length)
     if args.usernames > 0:
-        _bench_usernames(count=args.usernames, profile=args.profile, uniqueness_mode=args.uniqueness_mode)
+        _bench_usernames(count=args.usernames, profile=args.profile, allow_token_reuse=args.allow_token_reuse)
     return 0
 
 
