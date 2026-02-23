@@ -6,6 +6,7 @@ from typing import Callable, Set
 from usnpw.core.username_policies import PlatformPolicy
 
 _RE_IMMEDIATE_REPEAT = re.compile(r"([a-z0-9]{3,10})\1")
+_RE_COMPONENT_SPLIT = re.compile(r"[._-]+")
 
 
 def extract_component_tokens(username: str, *, normalize_token: Callable[[str], str]) -> Set[str]:
@@ -13,7 +14,7 @@ def extract_component_tokens(username: str, *, normalize_token: Callable[[str], 
     Split by separators and normalize pieces.
     This helps prevent reusing recognizable component tokens across runs.
     """
-    parts = re.split(r"[._-]+", username)
+    parts = _RE_COMPONENT_SPLIT.split(username)
     toks = set()
     for p in parts:
         t = normalize_token(p)
@@ -27,7 +28,11 @@ def has_repeated_component_pattern(username: str, *, normalize_token: Callable[[
     Reject obvious immediate repetition patterns that are easy to cluster.
     Examples: "axis_axis", "axisaxis", "token-token".
     """
-    parts = [normalize_token(p) for p in re.split(r"[._-]+", username) if normalize_token(p)]
+    parts: list[str] = []
+    for piece in _RE_COMPONENT_SPLIT.split(username):
+        normalized = normalize_token(piece)
+        if normalized:
+            parts.append(normalized)
     for i in range(1, len(parts)):
         if parts[i] == parts[i - 1] and len(parts[i]) >= 3:
             return True

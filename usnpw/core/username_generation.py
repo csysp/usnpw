@@ -20,6 +20,40 @@ def _encode_counter_bytes(counter: int) -> bytes:
     return counter.to_bytes(width, "big")
 
 
+def _normalized_disallow_filters(
+    policy: PlatformPolicy,
+    disallow_prefixes: Tuple[str, ...],
+    disallow_substrings: Tuple[str, ...],
+) -> Tuple[Tuple[str, ...], Tuple[str, ...]]:
+    if policy.case_insensitive:
+        prefixes = tuple(p.lower() for p in disallow_prefixes if p)
+        subs = tuple(sub.lower() for sub in disallow_substrings if sub)
+    else:
+        prefixes = tuple(p for p in disallow_prefixes if p)
+        subs = tuple(sub for sub in disallow_substrings if sub)
+    return prefixes, subs
+
+
+def _violates_disallow_filters(value: str, prefixes: Tuple[str, ...], subs: Tuple[str, ...]) -> bool:
+    if any(value.startswith(p) for p in prefixes):
+        return True
+    if any(sub in value for sub in subs):
+        return True
+    return False
+
+
+def _stream_base_attempts(total_attempts: int, *, block_tokens: bool) -> int:
+    """
+    Allocate a bounded inner search window for each stream attempt.
+    This avoids hard-failing the entire stream on one unlucky candidate window.
+    """
+    if total_attempts <= 0:
+        return 1
+    if block_tokens:
+        return max(60, min(240, total_attempts // 8))
+    return max(30, min(120, total_attempts // 10))
+
+
 def normalize_for_platform(u: str, policy: PlatformPolicy, max_len: int) -> str:
     if policy.lowercase:
         u = u.lower()
@@ -60,12 +94,7 @@ def generate_unique(
     push_state: bool = True,
     username_key_hasher: Callable[[str], str] | None = None,
 ) -> Tuple[str, str, str, str, Set[str]]:
-    if policy.case_insensitive:
-        prefixes = tuple(p.lower() for p in disallow_prefixes if p)
-        subs = tuple(sub.lower() for sub in disallow_substrings if sub)
-    else:
-        prefixes = tuple(p for p in disallow_prefixes if p)
-        subs = tuple(sub for sub in disallow_substrings if sub)
+    prefixes, subs = _normalized_disallow_filters(policy, disallow_prefixes, disallow_substrings)
 
     saw_token_conflict = False
     saw_non_token_rejection = False
@@ -84,10 +113,7 @@ def generate_unique(
 
         ul = u.lower() if policy.case_insensitive else u
 
-        if any(ul.startswith(p) for p in prefixes):
-            saw_non_token_rejection = True
-            continue
-        if any(sub in ul for sub in subs):
+        if _violates_disallow_filters(ul, prefixes, subs):
             saw_non_token_rejection = True
             continue
         u_key = normalize_username_key(u, case_insensitive=policy.case_insensitive)
@@ -99,8 +125,8 @@ def generate_unique(
             continue
 
         # Block reusable component tokens (optional, but recommended)
-        comp_toks = uniqueness.extract_component_tokens(u, normalize_token=lexicon.normalize_token)
         if block_tokens:
+            comp_toks = uniqueness.extract_component_tokens(u, normalize_token=lexicon.normalize_token)
             # include builder's internal tokens + extracted tokens
             all_toks = set(tokens_used) | comp_toks
             # if ANY token already blacklisted, reject
@@ -145,30 +171,34 @@ def generate_stream_unique(
     if stream_counter < 0:
         raise ValueError("stream counter must be non-negative")
 
-    if policy.case_insensitive:
-        prefixes = tuple(p.lower() for p in disallow_prefixes if p)
-        subs = tuple(s.lower() for s in disallow_substrings if s)
-    else:
-        prefixes = tuple(p for p in disallow_prefixes if p)
-        subs = tuple(s for s in disallow_substrings if s)
+    prefixes, subs = _normalized_disallow_filters(policy, disallow_prefixes, disallow_substrings)
+    empty_keys: set[str] = set()
+    empty_filters: tuple[str, ...] = tuple()
+    base_attempts = _stream_base_attempts(attempts, block_tokens=block_tokens)
+    saw_token_exhaustion = False
 
     for _ in range(attempts):
-        base_u, scheme_name, sep_used, case_style_used, used_tokens = generate_unique(
-            username_blacklist_keys=set(),
-            token_blacklist=token_blacklist,
-            max_len=max_len,
-            min_len=1,
-            policy=policy,
-            disallow_prefixes=tuple(),
-            disallow_substrings=tuple(),
-            state=state,
-            schemes=schemes,
-            pools=pools,
-            history_n=history_n,
-            block_tokens=block_tokens,
-            attempts=1200,
-            push_state=False,
-        )
+        try:
+            base_u, scheme_name, sep_used, case_style_used, used_tokens = generate_unique(
+                username_blacklist_keys=empty_keys,
+                token_blacklist=token_blacklist,
+                max_len=max_len,
+                min_len=1,
+                policy=policy,
+                disallow_prefixes=empty_filters,
+                disallow_substrings=empty_filters,
+                state=state,
+                schemes=schemes,
+                pools=pools,
+                history_n=history_n,
+                block_tokens=block_tokens,
+                attempts=base_attempts,
+                push_state=False,
+            )
+        except RuntimeError as exc:
+            if block_tokens and str(exc) == TOKEN_BLOCK_EXHAUSTION_ERROR:
+                saw_token_exhaustion = True
+            continue
 
         counter_bytes = _encode_counter_bytes(stream_counter)
         layout_digest = hmac.new(stream_key, b"layout:" + counter_bytes, hashlib.sha256).digest()
@@ -191,9 +221,7 @@ def generate_stream_unique(
 
         cmp_u = u.lower() if policy.case_insensitive else u
 
-        if any(cmp_u.startswith(p) for p in prefixes):
-            continue
-        if any(s in cmp_u for s in subs):
+        if _violates_disallow_filters(cmp_u, prefixes, subs):
             continue
 
         u_key = normalize_username_key(u, case_insensitive=policy.case_insensitive)
@@ -204,6 +232,9 @@ def generate_stream_unique(
         if existing_username_keys is not None:
             existing_username_keys.add(u_key)
         return u, scheme_name, sep_used, case_style_used, used_tokens, stream_counter
+
+    if block_tokens and saw_token_exhaustion:
+        raise RuntimeError(TOKEN_BLOCK_EXHAUSTION_ERROR)
 
     raise RuntimeError(
         "Failed to generate a stream-unique username within attempt budget. "

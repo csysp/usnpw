@@ -16,6 +16,62 @@ from usnpw.core.models import (
 )
 
 
+def _token_pool_index(pools: username_lexicon.RunPools) -> tuple[dict[str, str], dict[str, int]]:
+    token_bucket: dict[str, str] = {}
+    remaining = {"adj": 0, "noun": 0, "verb": 0, "pseudo": 0}
+    bucket_sources = (
+        ("adj", pools.adjectives),
+        ("noun", pools.nouns),
+        ("verb", pools.verbs),
+        ("pseudo", pools.pseudos),
+    )
+    for bucket, words in bucket_sources:
+        bucket_seen: set[str] = set()
+        for word in words:
+            tok = username_lexicon.normalize_token(word)
+            if not tok or tok in token_bucket:
+                continue
+            token_bucket[tok] = bucket
+            bucket_seen.add(tok)
+        remaining[bucket] = len(bucket_seen)
+    return token_bucket, remaining
+
+
+def _consume_remaining_token_budget(
+    remaining: dict[str, int],
+    token_bucket: dict[str, str],
+    new_tokens: set[str],
+) -> None:
+    for tok in new_tokens:
+        bucket = token_bucket.get(tok)
+        if bucket is None:
+            continue
+        if remaining[bucket] > 0:
+            remaining[bucket] -= 1
+
+
+def _active_schemes_for_token_budget(
+    schemes: list[username_schemes.Scheme],
+    remaining: dict[str, int],
+) -> list[username_schemes.Scheme]:
+    active: list[username_schemes.Scheme] = []
+    for scheme in schemes:
+        costs = username_schemes.SCHEME_TOKEN_COSTS.get(scheme.name)
+        if costs is None:
+            active.append(scheme)
+            continue
+        if costs.adj > remaining["adj"]:
+            continue
+        if costs.noun > remaining["noun"]:
+            continue
+        if costs.verb > remaining["verb"]:
+            continue
+        if costs.pseudo > remaining["pseudo"]:
+            continue
+        active.append(scheme)
+    return active
+
+
 def _validate_request(request: UsernameRequest) -> tuple[username_policies.PlatformPolicy, int, int]:
     if request.count <= 0:
         raise ValueError("count must be > 0")
@@ -24,6 +80,10 @@ def _validate_request(request: UsernameRequest) -> tuple[username_policies.Platf
         raise ValueError("min_len and max_len must be > 0")
     if request.min_len > request.max_len:
         raise ValueError("min_len cannot be greater than max_len")
+    if request.history <= 0:
+        raise ValueError("history must be > 0")
+    if request.initials_weight < 0:
+        raise ValueError("initials_weight must be >= 0")
 
     if not (0.10 <= request.max_scheme_pct <= 0.80):
         raise ValueError("max_scheme_pct must be between 0.10 and 0.80")
@@ -100,7 +160,7 @@ def generate_usernames(request: UsernameRequest) -> UsernameResult:
         total_target=request.count,
         max_scheme_pct=request.max_scheme_pct,
     )
-    history_n = max(1, request.history)
+    history_n = request.history
 
     disallow_prefixes = list(request.disallow_prefix)
     if request.no_leading_digit:
@@ -109,6 +169,8 @@ def generate_usernames(request: UsernameRequest) -> UsernameResult:
     effective_disallow_substrings = tuple(request.disallow_substring)
 
     token_cap: int | None = None
+    token_bucket: dict[str, str] | None = None
+    remaining_token_budget: dict[str, int] | None = None
     if request.block_tokens:
         token_cap = username_schemes.max_token_block_count(
             pools=pools,
@@ -122,6 +184,7 @@ def generate_usernames(request: UsernameRequest) -> UsernameResult:
                 f"requested={request.count}, theoretical_max={token_cap}. "
                 f"Try count <= {suggested}, increase --pool-scale, or pass --allow-token-reuse."
             )
+        token_bucket, remaining_token_budget = _token_pool_index(pools)
 
     stream_root_secret = os.urandom(32)
     stream_key = username_stream_state.derive_stream_profile_key(stream_root_secret, request.profile)
@@ -131,6 +194,17 @@ def generate_usernames(request: UsernameRequest) -> UsernameResult:
 
     records: list[UsernameRecord] = []
     for _ in range(request.count):
+        iteration_schemes = schemes
+        if request.block_tokens and remaining_token_budget is not None:
+            iteration_schemes = _active_schemes_for_token_budget(schemes, remaining_token_budget)
+            if not iteration_schemes:
+                raise ValueError(
+                    username_uniqueness.token_saturation_message(
+                        requested=request.count,
+                        generated=len(records),
+                        token_cap=token_cap,
+                    )
+                )
         try:
             (
                 username,
@@ -150,7 +224,7 @@ def generate_usernames(request: UsernameRequest) -> UsernameResult:
                 disallow_prefixes=effective_disallow_prefixes,
                 disallow_substrings=effective_disallow_substrings,
                 state=state,
-                schemes=schemes,
+                schemes=iteration_schemes,
                 pools=pools,
                 history_n=history_n,
                 block_tokens=request.block_tokens,
@@ -174,7 +248,10 @@ def generate_usernames(request: UsernameRequest) -> UsernameResult:
             )
         )
         if request.block_tokens and used_tokens:
+            new_tokens = used_tokens - token_blacklist
             token_blacklist |= used_tokens
+            if token_bucket is not None and remaining_token_budget is not None and new_tokens:
+                _consume_remaining_token_budget(remaining_token_budget, token_bucket, new_tokens)
 
     return UsernameResult(
         records=tuple(records),

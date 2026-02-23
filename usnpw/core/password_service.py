@@ -28,6 +28,10 @@ def generate_passwords(request: PasswordRequest) -> PasswordResult:
 
     if request.count <= 0:
         raise ValueError("count must be > 0")
+    if request.entropy_bytes < 0:
+        raise ValueError("bytes must be >= 0")
+    if request.bits < 0:
+        raise ValueError("bits must be >= 0")
     if request.format == "bip39" and not request.bip39_wordlist.strip():
         raise ValueError("bip39_wordlist is required when format is bip39")
 
@@ -48,7 +52,7 @@ def generate_passwords(request: PasswordRequest) -> PasswordResult:
         return PasswordResult(outputs=tuple(outputs))
 
     nbytes = request.entropy_bytes
-    if nbytes <= 0:
+    if nbytes == 0:
         if request.bits:
             if request.bits % 8 != 0:
                 raise ValueError("bits must be a multiple of 8")

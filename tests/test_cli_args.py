@@ -8,7 +8,7 @@ from usnpw.cli.opsec_username_cli import (
     main as username_main,
     parse_args as parse_username_args,
 )
-from usnpw.cli.pwgen_cli import parse_args as parse_password_args
+from usnpw.cli.pwgen_cli import main as password_main, parse_args as parse_password_args
 from usnpw.cli.usnpw_cli import main as usnpw_main
 
 
@@ -35,6 +35,20 @@ class CliArgTests(unittest.TestCase):
             rc = username_main(["-n", "0"])
         self.assertEqual(rc, 2)
         self.assertIn("count must be > 0", stderr.getvalue())
+
+    def test_username_cli_main_rejects_non_positive_history(self) -> None:
+        stderr = io.StringIO()
+        with redirect_stderr(stderr):
+            rc = username_main(["-n", "1", "--history", "0"])
+        self.assertEqual(rc, 2)
+        self.assertIn("history must be > 0", stderr.getvalue())
+
+    def test_password_cli_main_rejects_negative_bytes(self) -> None:
+        stderr = io.StringIO()
+        with redirect_stderr(stderr):
+            rc = password_main(["--format", "hex", "--bytes", "-1"])
+        self.assertEqual(rc, 2)
+        self.assertIn("bytes must be >= 0", stderr.getvalue())
 
     def test_usnpw_cli_defaults_to_password_mode(self) -> None:
         stdout = io.StringIO()

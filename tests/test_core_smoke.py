@@ -299,6 +299,107 @@ class CoreSmokeTests(unittest.TestCase):
                     attempts=3,
                 )
 
+    def test_stream_generation_retries_after_transient_inner_failure(self) -> None:
+        stream_key = b"\x06" * 32
+        base36 = "0123456789abcdefghijklmnopqrstuvwxyz"
+        tag_map = {ch: ch for ch in base36}
+        policy = PLATFORM_POLICIES["reddit"]
+
+        pools = username_lexicon.RunPools(
+            adjectives=["able"],
+            nouns=["node"],
+            verbs=["build"],
+            pseudos=["keko"],
+            tags=["xx"],
+        )
+        schemes = [username_schemes.Scheme("adj_noun", 1.0, username_schemes.scheme_adj_noun)]
+        state = username_schemes.GenState(
+            recent_schemes=[],
+            recent_seps=[],
+            recent_case_styles=[],
+            scheme_counts={},
+            total_target=1,
+            max_scheme_pct=1.0,
+        )
+
+        with patch(
+            "usnpw.core.username_generation.generate_unique",
+            side_effect=[
+                RuntimeError("Failed to generate a unique username within attempt budget."),
+                ("able_node", "adj_noun", "_", "lower", {"able", "node"}),
+            ],
+        ):
+            username, scheme_name, sep_used, case_style_used, used_tokens, stream_counter = username_generation.generate_stream_unique(
+                stream_key=stream_key,
+                stream_tag_map=tag_map,
+                stream_counter=0,
+                token_blacklist=set(),
+                max_len=16,
+                min_len=policy.min_len,
+                policy=policy,
+                disallow_prefixes=tuple(),
+                disallow_substrings=tuple(),
+                state=state,
+                schemes=schemes,
+                pools=pools,
+                history_n=1,
+                block_tokens=True,
+                attempts=4,
+            )
+        self.assertTrue(username)
+        self.assertEqual(scheme_name, "adj_noun")
+        self.assertEqual(sep_used, "_")
+        self.assertEqual(case_style_used, "lower")
+        self.assertEqual(used_tokens, {"able", "node"})
+        self.assertEqual(stream_counter, 1)
+        self.assertEqual(state.scheme_counts.get("adj_noun"), 1)
+
+    def test_stream_generation_propagates_token_exhaustion_after_inner_windows(self) -> None:
+        stream_key = b"\x07" * 32
+        base36 = "0123456789abcdefghijklmnopqrstuvwxyz"
+        tag_map = {ch: ch for ch in base36}
+        policy = PLATFORM_POLICIES["reddit"]
+
+        pools = username_lexicon.RunPools(
+            adjectives=["able"],
+            nouns=["node"],
+            verbs=["build"],
+            pseudos=["keko"],
+            tags=["xx"],
+        )
+        schemes = [username_schemes.Scheme("adj_noun", 1.0, username_schemes.scheme_adj_noun)]
+        state = username_schemes.GenState(
+            recent_schemes=[],
+            recent_seps=[],
+            recent_case_styles=[],
+            scheme_counts={},
+            total_target=1,
+            max_scheme_pct=1.0,
+        )
+
+        with patch(
+            "usnpw.core.username_generation.generate_unique",
+            side_effect=RuntimeError(username_generation.TOKEN_BLOCK_EXHAUSTION_ERROR),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "Token-block candidate space exhausted"):
+                username_generation.generate_stream_unique(
+                    stream_key=stream_key,
+                    stream_tag_map=tag_map,
+                    stream_counter=0,
+                    token_blacklist=set(),
+                    max_len=16,
+                    min_len=policy.min_len,
+                    policy=policy,
+                    disallow_prefixes=tuple(),
+                    disallow_substrings=tuple(),
+                    state=state,
+                    schemes=schemes,
+                    pools=pools,
+                    history_n=1,
+                    block_tokens=True,
+                    attempts=3,
+                )
+
     def test_core_package_import_is_lightweight(self) -> None:
         probe = (
             "import sys; import usnpw.core; "
@@ -322,6 +423,52 @@ class CoreSmokeTests(unittest.TestCase):
         self.assertTrue(username_uniqueness.has_repeated_component_pattern("axisaxis", normalize_token=normalize_token))
         self.assertEqual(username_uniqueness.apply_stream_tag("samplecore", "abc", policy, 16, 3), "samplecore-abc")
         self.assertIn("Token-block saturation reached", username_uniqueness.token_saturation_message(10, 7, 8))
+
+    def test_generate_unique_skips_component_extraction_when_token_blocking_disabled(self) -> None:
+        policy = PLATFORM_POLICIES["reddit"]
+
+        def _fixed_builder(state, pools, history_n):  # type: ignore[no-untyped-def]
+            del state, pools, history_n
+            return "alpha_node", "_", "lower", {"alpha", "node"}
+
+        pools = username_lexicon.RunPools(
+            adjectives=["alpha"],
+            nouns=["node"],
+            verbs=["build"],
+            pseudos=["keko"],
+            tags=["xx"],
+        )
+        schemes = [username_schemes.Scheme("fixed", 1.0, _fixed_builder)]
+        state = username_schemes.GenState(
+            recent_schemes=[],
+            recent_seps=[],
+            recent_case_styles=[],
+            scheme_counts={},
+            total_target=1,
+            max_scheme_pct=1.0,
+        )
+
+        with patch(
+            "usnpw.core.username_generation.uniqueness.extract_component_tokens",
+            side_effect=AssertionError("extract_component_tokens should not run when block_tokens is False"),
+        ):
+            username, _, _, _, used_tokens = username_generation.generate_unique(
+                username_blacklist_keys=set(),
+                token_blacklist=set(),
+                max_len=20,
+                min_len=3,
+                policy=policy,
+                disallow_prefixes=tuple(),
+                disallow_substrings=tuple(),
+                state=state,
+                schemes=schemes,
+                pools=pools,
+                history_n=1,
+                block_tokens=False,
+                attempts=5,
+            )
+        self.assertTrue(username)
+        self.assertEqual(used_tokens, set())
 
     def test_lexicon_and_scheme_modules_are_consistent(self) -> None:
         self.assertEqual(username_lexicon.normalize_token("Alpha_Beta-123"), "alphabeta123")
