@@ -3,8 +3,11 @@
 usnpw is a local only CLI for private credential generation.
 Designed around proven OS CSRNG for strong password/secret generation and it also includes a profile-aware, anti-fingerprint username generator. 
 Hardened by default it is single-user CLI only, stdlib-only, no API server, no GUI, no telemetry, no background network services.
+FOSS and easily extensible this tool can greatly increase time saved in iterative testing situations, as well as general use on the internet.
 
-## Usage (Once Installed)
+Why use usnpw? It's just easier and safer.
+
+## Usage Examples (Once Installed)
 ```powershell
 # Passwords
 usnpw -n 5 -l 24
@@ -14,9 +17,11 @@ usnpw username -n 20 --profile reddit
 
 # Higher throughput (allows token reuse)
 usnpw username -n 200 --profile reddit --allow-token-reuse
+*
+# Check advanced use for detailed runbook
 ```
 
-## Supported Username Profiles
+## Supported Username Profiles (Create git issue to request new profiles)
 `generic`, `reddit`, `x`, `github`, `discord`, `facebook`, `linkedin`, `instagram`, `pinterest`, `snapchat`, `telegram`, `tiktok`, `douyin`, `vk`, `youtube`
 
 ## Quick Start (Python SC only)
