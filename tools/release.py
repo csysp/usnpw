@@ -10,6 +10,7 @@ import py_compile
 import shutil
 import subprocess
 import sys
+import textwrap
 import unittest
 from dataclasses import dataclass
 from pathlib import Path
@@ -173,6 +174,67 @@ def _target_artifact_path(bin_dir: Path, output_base: str) -> Path | None:
     return None
 
 
+def _windows_installer_script_text(artifact_name: str) -> str:
+    return textwrap.dedent(
+        f"""\
+        [CmdletBinding()]
+        param(
+            [string]$ArtifactPath = (Join-Path $PSScriptRoot '{artifact_name}'),
+            [string]$InstallDir = $(if ($env:LOCALAPPDATA) {{ Join-Path $env:LOCALAPPDATA 'usnpw\\bin' }} else {{ Join-Path $HOME 'AppData\\Local\\usnpw\\bin' }}),
+            [switch]$NoPathUpdate
+        )
+
+        $ErrorActionPreference = 'Stop'
+
+        if (-not (Test-Path -LiteralPath $ArtifactPath -PathType Leaf)) {{
+            throw "CLI artifact not found: $ArtifactPath"
+        }}
+
+        New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
+        $Destination = Join-Path $InstallDir 'usnpw.exe'
+        Copy-Item -LiteralPath $ArtifactPath -Destination $Destination -Force
+
+        $Hash = (Get-FileHash -LiteralPath $Destination -Algorithm SHA256).Hash
+        $Sidecar = "$Destination.sha256"
+        Set-Content -LiteralPath $Sidecar -Value "$Hash *usnpw.exe" -Encoding Ascii
+
+        Write-Host "[installer] wrote $Destination"
+        Write-Host "[installer] wrote $Sidecar"
+
+        if ($NoPathUpdate) {{
+            Write-Host "[installer] skipped PATH update."
+            exit 0
+        }}
+
+        $CurrentPath = (Get-ItemProperty -Path 'HKCU:\\Environment' -Name Path -ErrorAction SilentlyContinue).Path
+        $Parts = @()
+        if ($CurrentPath) {{
+            $Parts = $CurrentPath -split ';' | Where-Object {{ $_ -and $_ -ine $InstallDir }}
+        }}
+
+        $NewPath = $InstallDir
+        if ($Parts.Count -gt 0) {{
+            $NewPath += ';' + ($Parts -join ';')
+        }}
+        Set-ItemProperty -Path 'HKCU:\\Environment' -Name Path -Value $NewPath
+        Write-Host "[installer] added to user PATH: $InstallDir"
+        Write-Host "[installer] restart your shell to use `usnpw` directly."
+        """
+    )
+
+
+def _write_installer_artifact(*, target: BinaryTarget, output_base: str, artifact: Path) -> Path | None:
+    if target.key != "cli":
+        return None
+    if artifact.suffix.lower() != ".exe":
+        return None
+
+    installer = artifact.parent / f"{output_base}-installer.ps1"
+    installer.write_text(_windows_installer_script_text(artifact.name), encoding="utf-8")
+    print(f"[binaries] wrote {installer}")
+    return installer
+
+
 def build_binaries(dist_dir: Path, target_keys: Sequence[str]) -> list[Path]:
     targets = _binary_target_map()
     selected: list[BinaryTarget] = [targets[key] for key in target_keys]
@@ -234,6 +296,10 @@ def build_binaries(dist_dir: Path, target_keys: Sequence[str]) -> list[Path]:
             )
         print(f"[binaries] wrote {artifact}")
         artifacts.append(artifact)
+
+        installer = _write_installer_artifact(target=target, output_base=output_base, artifact=artifact)
+        if installer is not None:
+            artifacts.append(installer)
 
     return artifacts
 

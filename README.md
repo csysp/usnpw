@@ -71,6 +71,12 @@ python3 ./tools/release.py install-cli
 ```
 
 Build note: `tools/release.py` enforces `pyinstaller==6.16.0` for local binary builds.
+Windows binary builds also emit a companion installer script in `dist/bin/`:
+`usnpw-windows-cli-installer.ps1`
+
+Iterative uninstall helper:
+- Windows: `py .\tools\uninstall_cli.py`
+- Linux/macOS: `python3 ./tools/uninstall_cli.py`
 
 ## License
 This project is licensed under GNU GPLv3 (`GPL-3.0-only`). See `LICENSE`.

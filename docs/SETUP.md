@@ -44,3 +44,27 @@ py .\tools\release.py preflight
 ```
 
 This runs compile checks and all unit tests in `tests/`.
+
+## Windows Installer Artifact
+After `py .\tools\release.py binaries`, a companion installer script is written to:
+`dist\bin\usnpw-windows-cli-installer.ps1`
+
+Run it on target hosts:
+```powershell
+.\dist\bin\usnpw-windows-cli-installer.ps1
+# optional: skip persistent PATH update
+.\dist\bin\usnpw-windows-cli-installer.ps1 -NoPathUpdate
+```
+
+## Uninstall (Iterative Testing)
+```powershell
+py .\tools\uninstall_cli.py
+# optional: also remove persistent PATH entry
+py .\tools\uninstall_cli.py --remove-path
+```
+
+```bash
+python3 ./tools/uninstall_cli.py
+# optional: also remove persistent PATH entry
+python3 ./tools/uninstall_cli.py --remove-path
+```
