@@ -91,6 +91,14 @@ class PasswordEntropyTests(unittest.TestCase):
             expected_calls += max(0, window - 2)
         self.assertEqual(mock_probe.call_count, expected_calls)
 
+    def test_repeat_matches_ignore_two_character_runs(self) -> None:
+        matches = password_entropy._repeat_matches("aa")
+        self.assertEqual(matches, ())
+
+    def test_repeat_matches_still_detect_multi_char_repeated_blocks(self) -> None:
+        matches = password_entropy._repeat_matches("abab")
+        self.assertTrue(any(m.pattern == "repeat" and (m.end - m.start + 1) == 4 for m in matches))
+
     def test_pattern_aware_entropy_keeps_irregular_values_near_theoretical(self) -> None:
         alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
         value = "hG7qL2zA"

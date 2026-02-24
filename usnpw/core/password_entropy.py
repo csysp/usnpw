@@ -297,12 +297,12 @@ def _dictionary_guesses_for_token(token: str) -> float | None:
     reversed_token = token_lc[::-1]
     reversed_normalized = _normalize_l33t(reversed_token)
 
-    candidates: tuple[tuple[str, bool, bool], ...] = (
-        (token_lc, False, False),
-        (normalized, normalized != token_lc, False),
-        (reversed_token, False, True),
-        (reversed_normalized, reversed_normalized != reversed_token, True),
-    )
+    candidates: list[tuple[str, bool, bool]] = [(token_lc, False, False)]
+    if normalized != token_lc:
+        candidates.append((normalized, True, False))
+    candidates.append((reversed_token, False, True))
+    if reversed_normalized != reversed_token:
+        candidates.append((reversed_normalized, True, True))
 
     hits: list[tuple[int, bool, bool]] = []
     for candidate, leet_hit, reversed_hit in candidates:
@@ -343,10 +343,12 @@ def _repeat_matches(password: str) -> tuple[_Match, ...]:
             out.append(_Match(i, j - 1, math.log10(guesses), "repeat"))
         i = j
 
-    # Repeated blocks (e.g., "abcabc", "xYxYxY")
+    # Repeated blocks (e.g., "abcabc", "xYxYxY").
+    # Single-char repeats are handled above; skip block_size=1 to avoid
+    # over-penalizing incidental two-character pairs like "aa".
     for start in range(n):
         max_block = (n - start) // 2
-        for block_size in range(1, max_block + 1):
+        for block_size in range(2, max_block + 1):
             block = password[start : start + block_size]
             repeat_count = 1
             pos = start + block_size

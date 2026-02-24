@@ -30,6 +30,7 @@ class PasswordRequest:
     words: int = 24
     delim: str = " "
     bip39_wordlist: str = ""
+    show_meta: bool = False
 
 
 @dataclass(frozen=True)
@@ -45,11 +46,12 @@ class PasswordResult:
 
         has_per_output_bits = len(self.entropy_bits_by_output) == len(self.outputs)
         has_per_output_quality = len(self.entropy_quality_by_output) == len(self.outputs)
+        has_estimated_bits = self.estimated_entropy_bits > 0.0
 
         lines: list[str] = []
         for idx, value in enumerate(self.outputs):
             bits_value = self.entropy_bits_by_output[idx] if has_per_output_bits else self.estimated_entropy_bits
-            if math.isfinite(bits_value):
+            if (has_per_output_bits or has_estimated_bits) and math.isfinite(bits_value):
                 rounded = round(bits_value, 3)
                 if rounded.is_integer():
                     bits_text = str(int(rounded))

@@ -105,7 +105,9 @@ def generate_passwords(request: PasswordRequest) -> PasswordResult:
             if not request.no_symbols:
                 alphabet += request.symbols
         _validate_password_alphabet(alphabet)
-        entropy_bits = estimate_theoretical_password_bits(request.length, alphabet)
+        entropy_bits = 0.0
+        if request.show_meta:
+            entropy_bits = estimate_theoretical_password_bits(request.length, alphabet)
         entropy_by_output: list[float] = []
         quality_by_output: list[str] = []
         for _ in range(request.count):
@@ -114,9 +116,10 @@ def generate_passwords(request: PasswordRequest) -> PasswordResult:
             except OSError as e:
                 raise ValueError(str(e)) from e
             outputs.append(generated)
-            observed_bits = estimate_pattern_aware_entropy_bits(generated, alphabet)
-            entropy_by_output.append(observed_bits)
-            quality_by_output.append(quality_from_entropy_bits(observed_bits))
+            if request.show_meta:
+                observed_bits = estimate_pattern_aware_entropy_bits(generated, alphabet)
+                entropy_by_output.append(observed_bits)
+                quality_by_output.append(quality_from_entropy_bits(observed_bits))
         return PasswordResult(
             outputs=tuple(outputs),
             estimated_entropy_bits=entropy_bits,
@@ -125,8 +128,11 @@ def generate_passwords(request: PasswordRequest) -> PasswordResult:
         )
 
     nbytes = _resolve_entropy_bytes(request)
-    entropy_bits = _estimate_entropy_bits_for_token(request, nbytes)
-    quality = quality_from_entropy_bits(entropy_bits)
+    entropy_bits = 0.0
+    quality = ""
+    if request.show_meta:
+        entropy_bits = _estimate_entropy_bits_for_token(request, nbytes)
+        quality = quality_from_entropy_bits(entropy_bits)
     entropy_by_output: list[float] = []
     quality_by_output: list[str] = []
 
@@ -143,8 +149,9 @@ def generate_passwords(request: PasswordRequest) -> PasswordResult:
             if request.group and request.format not in ("bip39", "uuid"):
                 out = engine.group_string(out, request.group, request.group_sep, request.group_pad)
             outputs.append(out)
-            entropy_by_output.append(entropy_bits)
-            quality_by_output.append(quality)
+            if request.show_meta:
+                entropy_by_output.append(entropy_bits)
+                quality_by_output.append(quality)
         except (OSError, UnicodeError, ValueError) as e:
             raise ValueError(str(e)) from e
 

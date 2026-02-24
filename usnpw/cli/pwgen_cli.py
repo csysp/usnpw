@@ -88,6 +88,7 @@ def main(argv: list[str] | None = None) -> int:
         words=args.words,
         delim=args.delim,
         bip39_wordlist=args.bip39_wordlist,
+        show_meta=args.show_meta,
     )
     try:
         result = generate_passwords(request)

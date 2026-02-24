@@ -16,14 +16,15 @@ class ServiceLayerTests(unittest.TestCase):
         request = PasswordRequest(count=4, length=12, charset="abc123", format="password")
         result = generate_passwords(request)
         self.assertEqual(len(result.outputs), 4)
-        self.assertEqual(len(result.entropy_bits_by_output), 4)
-        self.assertEqual(len(result.entropy_quality_by_output), 4)
+        self.assertEqual(result.estimated_entropy_bits, 0.0)
+        self.assertEqual(len(result.entropy_bits_by_output), 0)
+        self.assertEqual(len(result.entropy_quality_by_output), 0)
         for value in result.outputs:
             self.assertEqual(len(value), 12)
             self.assertTrue(set(value).issubset(set("abc123")))
 
     def test_password_service_estimates_password_entropy_bits(self) -> None:
-        result = generate_passwords(PasswordRequest(count=1, length=12, charset="ab", format="password"))
+        result = generate_passwords(PasswordRequest(count=1, length=12, charset="ab", format="password", show_meta=True))
         self.assertEqual(result.estimated_entropy_bits, 12.0)
         self.assertEqual(len(result.entropy_bits_by_output), 1)
         self.assertGreaterEqual(result.entropy_bits_by_output[0], 0.0)
@@ -31,23 +32,34 @@ class ServiceLayerTests(unittest.TestCase):
         self.assertIn(result.entropy_quality_by_output[0], {"bad", "poor", "weak", "good", "excellent"})
 
     def test_password_service_estimates_non_integer_password_entropy_bits(self) -> None:
-        result = generate_passwords(PasswordRequest(count=1, length=10, charset="abc", format="password"))
+        result = generate_passwords(
+            PasswordRequest(count=1, length=10, charset="abc", format="password", show_meta=True)
+        )
         self.assertAlmostEqual(result.estimated_entropy_bits, 10.0 * 1.584962500721156, places=9)
 
     def test_password_service_estimates_token_entropy_bits(self) -> None:
-        result = generate_passwords(PasswordRequest(count=1, format="hex", entropy_bytes=16))
+        result = generate_passwords(PasswordRequest(count=1, format="hex", entropy_bytes=16, show_meta=True))
         self.assertEqual(result.estimated_entropy_bits, 128.0)
         self.assertEqual(result.entropy_bits_by_output, (128.0,))
         self.assertEqual(result.entropy_quality_by_output, ("excellent",))
 
+    def test_password_service_token_mode_skips_entropy_without_meta(self) -> None:
+        result = generate_passwords(PasswordRequest(count=1, format="hex", entropy_bytes=16))
+        self.assertEqual(result.estimated_entropy_bits, 0.0)
+        self.assertEqual(result.entropy_bits_by_output, ())
+        self.assertEqual(result.entropy_quality_by_output, ())
+        rendered = result.as_lines(show_meta=True)
+        self.assertEqual(len(rendered), 1)
+        self.assertIn("[entropy=unknown bits]", rendered[0])
+
     def test_password_service_caps_hash_entropy_to_input_bits(self) -> None:
-        result = generate_passwords(PasswordRequest(count=1, format="sha512", entropy_bytes=16))
+        result = generate_passwords(PasswordRequest(count=1, format="sha512", entropy_bytes=16, show_meta=True))
         self.assertEqual(result.estimated_entropy_bits, 128.0)
         self.assertEqual(result.entropy_bits_by_output, (128.0,))
         self.assertEqual(result.entropy_quality_by_output, ("excellent",))
 
     def test_password_service_estimates_uuid4_entropy_bits(self) -> None:
-        result = generate_passwords(PasswordRequest(count=1, format="uuid", entropy_bytes=16))
+        result = generate_passwords(PasswordRequest(count=1, format="uuid", entropy_bytes=16, show_meta=True))
         self.assertEqual(result.estimated_entropy_bits, 122.0)
         self.assertEqual(result.entropy_bits_by_output, (122.0,))
         self.assertEqual(result.entropy_quality_by_output, ("excellent",))
@@ -63,6 +75,7 @@ class ServiceLayerTests(unittest.TestCase):
                     format="bip39",
                     words=12,
                     bip39_wordlist=str(path),
+                    show_meta=True,
                 )
             )
             self.assertEqual(result.estimated_entropy_bits, 128.0)
@@ -106,6 +119,7 @@ class ServiceLayerTests(unittest.TestCase):
                 length=6,
                 bits=130,
                 max_entropy=True,
+                show_meta=True,
             )
         )
         self.assertEqual(len(result.outputs), 2)
@@ -120,6 +134,29 @@ class ServiceLayerTests(unittest.TestCase):
             self.assertLessEqual(bits, 512.0)
         for quality in result.entropy_quality_by_output:
             self.assertIn(quality, {"bad", "poor", "weak", "good", "excellent"})
+
+    def test_password_service_skips_entropy_scoring_without_meta(self) -> None:
+        with patch(
+            "usnpw.core.password_service.estimate_pattern_aware_entropy_bits",
+            side_effect=AssertionError("unexpected entropy scoring"),
+        ):
+            result = generate_passwords(PasswordRequest(count=2, format="password", charset="ab", length=12))
+        self.assertEqual(len(result.outputs), 2)
+        self.assertEqual(result.estimated_entropy_bits, 0.0)
+        self.assertEqual(result.entropy_bits_by_output, ())
+        self.assertEqual(result.entropy_quality_by_output, ())
+
+    def test_password_service_runs_entropy_scoring_with_meta(self) -> None:
+        with patch(
+            "usnpw.core.password_service.estimate_pattern_aware_entropy_bits",
+            return_value=42.0,
+        ) as score_mock:
+            result = generate_passwords(
+                PasswordRequest(count=3, format="password", charset="ab", length=12, show_meta=True)
+            )
+        self.assertEqual(score_mock.call_count, 3)
+        self.assertEqual(result.entropy_bits_by_output, (42.0, 42.0, 42.0))
+        self.assertEqual(result.entropy_quality_by_output, ("weak", "weak", "weak"))
 
     def test_password_service_surfaces_csprng_probe_failures(self) -> None:
         with patch(
