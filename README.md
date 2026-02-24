@@ -3,7 +3,7 @@
 [![CI Matrix](https://github.com/csysp/usnpw/actions/workflows/ci-matrix.yml/badge.svg)](https://github.com/csysp/usnpw/actions/workflows/ci-matrix.yml)
 
 usnpw is a local only CLI for private credential generation.
-Designed around proven OS CSRNG for strong password/secret generation and it also includes a profile-aware, anti-fingerprint username generator. 
+Designed around proven OS CSPRNG for strong password/secret generation and it also includes a profile-aware, anti-fingerprint username generator. 
 Hardened by default it is single-user CLI only, stdlib-only, no API server, no GUI, no telemetry, no background network services.
 FOSS and easily extensible this tool can greatly increase time saved in iterative testing situations, as well as general use on the internet.
 
