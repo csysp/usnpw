@@ -9,11 +9,15 @@ LOG2_10 = math.log2(10.0)
 SEGMENT_PENALTY_LOG10 = math.log10(10.0)
 MAX_MATCH_SEQUENCE_LENGTH = 96
 MAX_REPEAT_BLOCK_SCAN = 24
+DATE_SEPARATORS = "-/_."
 
 # Clean-room weak-token list inspired by common credential audit findings.
 # Threat model rationale:
 # - These tokens are heavily over-represented in leaked credentials.
 # - Matching them reduces estimated entropy to fail closed on known-bad structure.
+# Source reference for curation (compact subset only, to avoid repo bloat):
+# - SecLists/Passwords/Common-Credentials/top-passwords-shortlist.txt
+# - SecLists/Passwords/Common-Credentials/top-20-common-SSH-passwords.txt
 COMMON_TOKENS: tuple[str, ...] = (
     "password",
     "passw0rd",
@@ -41,6 +45,7 @@ COMMON_TOKENS: tuple[str, ...] = (
     "dragon",
     "baseball",
     "football",
+    "footbal",
     "soccer",
     "master",
     "shadow",
@@ -48,13 +53,48 @@ COMMON_TOKENS: tuple[str, ...] = (
     "princess",
     "trustno1",
     "abc123",
+    "abc123456",
+    "123123",
+    "123123123",
+    "654321",
+    "987654321",
+    "qwerty123",
+    "qazwsx",
+    "zaq12wsx",
+    "1q2w3e",
+    "1q2w3e4r",
+    "1q2w3e4r5t",
     "123456",
+    "12345",
+    "1234",
     "1234567",
     "12345678",
     "123456789",
     "1234567890",
     "111111",
     "000000",
+    "toor",
+    "raspberry",
+    "dietpi",
+    "uploader",
+    "webadmin",
+    "webmaster",
+    "maintenance",
+    "techsupport",
+    "logon",
+    "alpine",
+    "marketing",
+    "querty",
+    "passw@rd",
+    "root123",
+    "admin123",
+    "password1",
+    "pass123",
+    "welcome1",
+    "changeme123",
+    "adminadmin",
+    "login123",
+    "qwerty1",
     "access",
     "login",
     "system",
@@ -108,6 +148,7 @@ _QWERTY_ROWS = ("1234567890", "qwertyuiop", "asdfghjkl", "zxcvbnm")
 _QWERTY_ADJ_CACHE: dict[str, set[str]] | None = None
 _QWERTY_START_POSITIONS_CACHE: int | None = None
 _QWERTY_AVG_DEGREE_CACHE: float | None = None
+_QWERTY_POS_CACHE: dict[str, tuple[int, int]] | None = None
 
 
 @dataclass(frozen=True)
@@ -229,25 +270,14 @@ def _minimum_log10_guesses(password: str, matches: tuple[_Match, ...]) -> float:
 
 
 def _dictionary_matches(password: str) -> tuple[_Match, ...]:
-    lowered = password.lower()
     n = len(password)
     out: list[_Match] = []
     for start in range(n):
         for end in range(start + 2, n):
             token = password[start : end + 1]
-            token_lc = lowered[start : end + 1]
-            rank = COMMON_TOKEN_RANK.get(token_lc)
-            leet_hit = False
-            if rank is None:
-                normalized = _normalize_l33t(token_lc)
-                rank = COMMON_TOKEN_RANK.get(normalized)
-                leet_hit = rank is not None and normalized != token_lc
-            if rank is None:
+            guesses = _dictionary_guesses_for_token(token)
+            if guesses is None:
                 continue
-
-            case_var = _case_variations(token)
-            leet_var = _leet_variations(token) if leet_hit else 1.0
-            guesses = max(1.0, float(rank) * case_var * leet_var)
             out.append(
                 _Match(
                     start=start,
@@ -257,6 +287,35 @@ def _dictionary_matches(password: str) -> tuple[_Match, ...]:
                 )
             )
     return tuple(out)
+
+
+def _dictionary_guesses_for_token(token: str) -> float | None:
+    token_lc = token.lower()
+    normalized = _normalize_l33t(token_lc)
+    reversed_token = token_lc[::-1]
+    reversed_normalized = _normalize_l33t(reversed_token)
+
+    candidates: tuple[tuple[str, bool, bool], ...] = (
+        (token_lc, False, False),
+        (normalized, normalized != token_lc, False),
+        (reversed_token, False, True),
+        (normalized[::-1], normalized != token_lc, True),
+        (reversed_normalized, reversed_normalized != reversed_token, True),
+    )
+
+    case_var = _case_variations(token)
+    leet_var = _leet_variations(token)
+    best: float | None = None
+    for candidate, leet_hit, reversed_hit in candidates:
+        rank = COMMON_TOKEN_RANK.get(candidate)
+        if rank is None:
+            continue
+        leet_factor = leet_var if leet_hit else 1.0
+        reversed_var = 2.0 if reversed_hit else 1.0
+        guesses = max(1.0, float(rank) * case_var * leet_factor * reversed_var)
+        if best is None or guesses < best:
+            best = guesses
+    return best
 
 
 def _repeat_matches(password: str) -> tuple[_Match, ...]:
@@ -337,7 +396,7 @@ def _sequence_matches(password: str) -> tuple[_Match, ...]:
                 run_end = i - 1
                 token = password[run_start : run_end + 1]
                 space = _sequence_space(token)
-                guesses = max(1.0, float(space) * len(token))
+                guesses = max(1.0, float(space) * 2.0 * len(token))
                 out.append(_Match(run_start, run_end, math.log10(guesses), "sequence"))
             run_start = i
             run_len = 1
@@ -347,7 +406,7 @@ def _sequence_matches(password: str) -> tuple[_Match, ...]:
         run_end = n - 1
         token = password[run_start : run_end + 1]
         space = _sequence_space(token)
-        guesses = max(1.0, float(space) * len(token))
+        guesses = max(1.0, float(space) * 2.0 * len(token))
         out.append(_Match(run_start, run_end, math.log10(guesses), "sequence"))
     return tuple(out)
 
@@ -387,7 +446,8 @@ def _spatial_matches(password: str) -> tuple[_Match, ...]:
             j += 1
         run_len = j - i + 1
         if run_len >= 3:
-            guesses = _qwerty_guesses(run_len)
+            token = password[i : j + 1]
+            guesses = _spatial_guesses(token)
             out.append(_Match(i, j, math.log10(max(1.0, guesses)), "spatial"))
             i = j
         i += 1
@@ -406,12 +466,146 @@ def _date_matches(password: str) -> tuple[_Match, ...]:
                 if 1900 <= year <= 2099:
                     out.append(_Match(start, start + 3, math.log10(200.0), "date"))
 
-        # Compact date pattern (ddmmyyyy / yyyymmdd)
-        if start + 8 <= n:
-            token8 = password[start : start + 8]
-            if token8.isdigit():
-                out.append(_Match(start, start + 7, math.log10(31.0 * 12.0 * 200.0), "date"))
+        for width in (6, 8):
+            if start + width > n:
+                continue
+            token = password[start : start + width]
+            if not token.isdigit():
+                continue
+            guesses = _compact_date_guesses(token)
+            if guesses is not None:
+                out.append(_Match(start, start + width - 1, math.log10(guesses), "date"))
+
+        max_end = min(n, start + 10)
+        for end in range(start + 6, max_end + 1):
+            token = password[start:end]
+            guesses = _separated_date_guesses(token)
+            if guesses is not None:
+                out.append(_Match(start, end - 1, math.log10(guesses), "date"))
     return tuple(out)
+
+
+def _compact_date_guesses(token: str) -> float | None:
+    if len(token) not in (6, 8):
+        return None
+
+    valid_orders = 0
+    year_digits = 4 if len(token) == 8 else 2
+
+    if len(token) == 8:
+        if _is_valid_date_parts(token[6:8], token[4:6], token[0:4]):
+            valid_orders += 1  # yyyymmdd
+        if _is_valid_date_parts(token[0:2], token[2:4], token[4:8]):
+            valid_orders += 1  # ddmmyyyy
+        if _is_valid_date_parts(token[2:4], token[0:2], token[4:8]):
+            valid_orders += 1  # mmddyyyy
+    else:
+        if _is_valid_date_parts(token[4:6], token[2:4], token[0:2]):
+            valid_orders += 1  # yymmdd
+        if _is_valid_date_parts(token[0:2], token[2:4], token[4:6]):
+            valid_orders += 1  # ddmmyy
+        if _is_valid_date_parts(token[2:4], token[0:2], token[4:6]):
+            valid_orders += 1  # mmddyy
+
+    if valid_orders == 0:
+        return None
+
+    year_space = 200.0 if year_digits == 4 else 100.0
+    return 31.0 * 12.0 * year_space * float(valid_orders)
+
+
+def _separated_date_guesses(token: str) -> float | None:
+    parts: list[str] = []
+    separators: list[str] = []
+    buf: list[str] = []
+
+    for ch in token:
+        if ch.isdigit():
+            buf.append(ch)
+            continue
+        if ch not in DATE_SEPARATORS:
+            return None
+        if not buf:
+            return None
+        parts.append("".join(buf))
+        separators.append(ch)
+        buf = []
+
+    if not buf:
+        return None
+    parts.append("".join(buf))
+
+    if len(parts) != 3 or len(separators) != 2:
+        return None
+    if any(len(part) < 1 or len(part) > 4 for part in parts):
+        return None
+
+    valid_orders = 0
+    year_digits = 0
+
+    first, second, third = parts
+    if len(first) in (2, 4) and len(second) <= 2 and len(third) <= 2:
+        if _is_valid_date_parts(third, second, first):
+            valid_orders += 1  # yy(yy)-mm-dd
+            year_digits = max(year_digits, len(first))
+
+    if len(third) in (2, 4) and len(first) <= 2 and len(second) <= 2:
+        if _is_valid_date_parts(first, second, third):
+            valid_orders += 1  # dd-mm-yy(yy)
+            year_digits = max(year_digits, len(third))
+        if _is_valid_date_parts(second, first, third):
+            valid_orders += 1  # mm-dd-yy(yy)
+            year_digits = max(year_digits, len(third))
+
+    if valid_orders == 0:
+        return None
+
+    year_space = 200.0 if year_digits == 4 else 100.0
+    separator_space = 4.0 if separators[0] == separators[1] else 16.0
+    return 31.0 * 12.0 * year_space * float(valid_orders) * separator_space
+
+
+def _is_valid_date_parts(day_s: str, month_s: str, year_s: str) -> bool:
+    if not (day_s.isdigit() and month_s.isdigit() and year_s.isdigit()):
+        return False
+    day = int(day_s)
+    month = int(month_s)
+    year = _parse_year(year_s)
+    if year is None:
+        return False
+    if month < 1 or month > 12:
+        return False
+    if day < 1:
+        return False
+    return day <= _days_in_month(year, month)
+
+
+def _parse_year(year_s: str) -> int | None:
+    if len(year_s) == 4:
+        year = int(year_s)
+        if 1900 <= year <= 2099:
+            return year
+        return None
+    if len(year_s) == 2:
+        year = int(year_s)
+        if year <= 49:
+            return 2000 + year
+        return 1900 + year
+    return None
+
+
+def _days_in_month(year: int, month: int) -> int:
+    if month == 2:
+        if _is_leap_year(year):
+            return 29
+        return 28
+    if month in (4, 6, 9, 11):
+        return 30
+    return 31
+
+
+def _is_leap_year(year: int) -> bool:
+    return year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)
 
 
 def _keep_best_match(store: dict[tuple[int, int, str], float], match: _Match) -> None:
@@ -426,24 +620,60 @@ def _normalize_l33t(token_lc: str) -> str:
 
 
 def _case_variations(token: str) -> float:
-    if token.islower():
+    alpha = [ch for ch in token if ch.isalpha()]
+    if not alpha:
         return 1.0
-    if token.isupper():
+    if all(ch.islower() for ch in alpha):
+        return 1.0
+    if all(ch.isupper() for ch in alpha):
         return 2.0
-    upper = sum(1 for ch in token if ch.isupper())
-    lower = sum(1 for ch in token if ch.islower())
-    alpha = upper + lower
-    if alpha == 0:
-        return 1.0
-    # Conservative approximation: each mixed-case alpha char doubles pattern space.
-    return float(2 ** min(alpha, 12))
+    if alpha[0].isupper() and all(ch.islower() for ch in alpha[1:]):
+        return 2.0
+
+    upper = sum(1 for ch in alpha if ch.isupper())
+    lower = sum(1 for ch in alpha if ch.islower())
+    if upper == 0 or lower == 0:
+        return 2.0
+
+    variations = 0
+    total = upper + lower
+    for i in range(1, min(upper, lower) + 1):
+        variations += _n_choose_k(total, i)
+    return float(max(1, variations))
 
 
 def _leet_variations(token: str) -> float:
-    leet_count = sum(1 for ch in token if ch in LEET_MAP)
-    if leet_count == 0:
-        return 1.0
-    return float(2 ** min(leet_count, 10))
+    token_lc = token.lower()
+    subbed: dict[str, int] = {}
+    plain: dict[str, int] = {}
+
+    for ch in token_lc:
+        mapped = LEET_MAP.get(ch)
+        if mapped is not None and ch != mapped:
+            subbed[mapped] = subbed.get(mapped, 0) + 1
+        elif "a" <= ch <= "z":
+            plain[ch] = plain.get(ch, 0) + 1
+
+    variations = 1.0
+    for letter, subbed_count in subbed.items():
+        plain_count = plain.get(letter, 0)
+        if plain_count == 0:
+            variations *= 2.0
+            continue
+
+        total = subbed_count + plain_count
+        per_letter = 0
+        for i in range(1, min(subbed_count, plain_count) + 1):
+            per_letter += _n_choose_k(total, i)
+        variations *= float(max(1, per_letter))
+
+    return variations
+
+
+def _n_choose_k(n: int, k: int) -> int:
+    if k < 0 or k > n:
+        return 0
+    return math.comb(n, k)
 
 
 def _sequence_delta(prev: str, curr: str) -> int:
@@ -467,6 +697,40 @@ def _qwerty_guesses(length: int) -> float:
     return float(_QWERTY_START_POSITIONS_CACHE) * (_QWERTY_AVG_DEGREE_CACHE ** max(0, length - 1))
 
 
+def _spatial_guesses(token: str) -> float:
+    length = len(token)
+    base = _qwerty_guesses(length)
+    turns = _spatial_turn_count(token)
+    return base * float(max(1, turns + 1))
+
+
+def _spatial_turn_count(token: str) -> int:
+    if len(token) < 3:
+        return 0
+    positions = _qwerty_positions()
+    prev_dx: int | None = None
+    prev_dy: int | None = None
+    turns = 0
+    for i in range(1, len(token)):
+        curr = token[i].lower()
+        prev = token[i - 1].lower()
+        curr_pos = positions.get(curr)
+        prev_pos = positions.get(prev)
+        if curr_pos is None or prev_pos is None:
+            prev_dx = None
+            prev_dy = None
+            continue
+        dx = curr_pos[0] - prev_pos[0]
+        dy = curr_pos[1] - prev_pos[1]
+        if dx == 0 and dy == 0:
+            continue
+        if prev_dx is not None and prev_dy is not None and (dx != prev_dx or dy != prev_dy):
+            turns += 1
+        prev_dx = dx
+        prev_dy = dy
+    return turns
+
+
 def _is_qwerty_adjacent(a: str, b: str) -> bool:
     _ensure_qwerty_cache()
     assert _QWERTY_ADJ_CACHE is not None
@@ -479,24 +743,39 @@ def _ensure_qwerty_cache() -> None:
     global _QWERTY_ADJ_CACHE
     global _QWERTY_START_POSITIONS_CACHE
     global _QWERTY_AVG_DEGREE_CACHE
+    global _QWERTY_POS_CACHE
     if _QWERTY_ADJ_CACHE is not None:
         return
 
-    graph = _build_qwerty_adjacency(_QWERTY_ROWS)
+    positions = _build_qwerty_positions(_QWERTY_ROWS)
+    graph = _build_qwerty_adjacency(positions, _QWERTY_ROWS)
     start_positions = len(graph)
     avg_degree = sum(len(v) for v in graph.values()) / float(start_positions)
 
+    _QWERTY_POS_CACHE = positions
     _QWERTY_ADJ_CACHE = graph
     _QWERTY_START_POSITIONS_CACHE = start_positions
     _QWERTY_AVG_DEGREE_CACHE = avg_degree
 
 
-def _build_qwerty_adjacency(rows: tuple[str, ...]) -> dict[str, set[str]]:
+def _qwerty_positions() -> dict[str, tuple[int, int]]:
+    _ensure_qwerty_cache()
+    assert _QWERTY_POS_CACHE is not None
+    return _QWERTY_POS_CACHE
+
+
+def _build_qwerty_positions(rows: tuple[str, ...]) -> dict[str, tuple[int, int]]:
     pos: dict[str, tuple[int, int]] = {}
     for r, row in enumerate(rows):
         for c, ch in enumerate(row):
             pos[ch] = (r, c)
+    return pos
 
+
+def _build_qwerty_adjacency(
+    pos: dict[str, tuple[int, int]],
+    rows: tuple[str, ...],
+) -> dict[str, set[str]]:
     out: dict[str, set[str]] = {ch: set() for ch in pos}
     for ch, (r, c) in pos.items():
         for rr in range(max(0, r - 1), min(len(rows), r + 2)):

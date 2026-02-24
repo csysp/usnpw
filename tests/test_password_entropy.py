@@ -39,6 +39,30 @@ class PasswordEntropyTests(unittest.TestCase):
         self.assertGreaterEqual(seq_bits, 0.0)
         self.assertLess(seq_bits, theoretical_bits)
 
+    def test_pattern_aware_entropy_penalizes_reversed_common_dictionary_tokens(self) -> None:
+        alphabet = "abcdefghijklmnopqrstuvwxyz"
+        value = "drowssap"
+        observed_bits = estimate_pattern_aware_entropy_bits(value, alphabet)
+        theoretical_bits = estimate_theoretical_password_bits(len(value), alphabet)
+        self.assertLess(observed_bits, theoretical_bits)
+
+    def test_pattern_aware_entropy_penalizes_l33t_common_dictionary_tokens(self) -> None:
+        alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$"
+        value = "P@ssw0rd"
+        observed_bits = estimate_pattern_aware_entropy_bits(value, alphabet)
+        theoretical_bits = estimate_theoretical_password_bits(len(value), alphabet)
+        self.assertLess(observed_bits, theoretical_bits)
+
+    def test_pattern_aware_entropy_penalizes_valid_separated_dates(self) -> None:
+        alphabet = "0123456789-"
+        valid_date = "2024-11-07"
+        invalid_date = "9385-41-76"
+        valid_bits = estimate_pattern_aware_entropy_bits(valid_date, alphabet)
+        invalid_bits = estimate_pattern_aware_entropy_bits(invalid_date, alphabet)
+        theoretical_bits = estimate_theoretical_password_bits(len(valid_date), alphabet)
+        self.assertLess(valid_bits, theoretical_bits)
+        self.assertLess(valid_bits, invalid_bits)
+
     def test_pattern_aware_entropy_keeps_irregular_values_near_theoretical(self) -> None:
         alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
         value = "hG7qL2zA"
