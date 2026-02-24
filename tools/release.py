@@ -8,8 +8,10 @@ import importlib.util
 import os
 import py_compile
 import shutil
+import stat
 import subprocess
 import sys
+import tarfile
 import unittest
 from dataclasses import dataclass
 from pathlib import Path
@@ -286,6 +288,52 @@ def build_binaries(dist_dir: Path, target_keys: Sequence[str]) -> list[Path]:
     return artifacts
 
 
+def _built_artifact_for_target(*, bin_dir: Path, target: BinaryTarget) -> Path:
+    output_base = _resolve_output_base(target)
+    artifact = _target_artifact_path(bin_dir, output_base)
+    if artifact is None:
+        raise ValueError(
+            f"artifact for target '{target.key}' not found under '{bin_dir}'. "
+            "Build binaries first with: "
+            f"{sys.executable} .\\tools\\release.py binaries --target {target.key}"
+        )
+    if artifact.is_dir():
+        raise ValueError(
+            f"expected one-file binary artifact for target '{target.key}', got directory: {artifact}"
+        )
+    return artifact
+
+
+def bundle_release_artifacts(dist_dir: Path, target_keys: Sequence[str]) -> list[Path]:
+    targets = _binary_target_map()
+    selected: list[BinaryTarget] = [targets[key] for key in target_keys]
+    if not selected:
+        raise ValueError("at least one bundle target is required")
+
+    bin_dir = dist_dir / "bin"
+    release_dir = dist_dir / "release"
+    release_dir.mkdir(parents=True, exist_ok=True)
+
+    packaged: list[Path] = []
+    for target in selected:
+        artifact = _built_artifact_for_target(bin_dir=bin_dir, target=target)
+        if os.name == "nt":
+            out = release_dir / artifact.name
+            shutil.copy2(artifact, out)
+        else:
+            out = release_dir / f"{artifact.name}.tar.gz"
+            with tarfile.open(out, "w:gz") as archive:
+                tar_info = archive.gettarinfo(str(artifact), arcname=artifact.name)
+                tar_info.mode = stat.S_IMODE(artifact.stat().st_mode) | 0o111
+                with artifact.open("rb") as source:
+                    archive.addfile(tar_info, source)
+        print(f"[bundle] wrote {out}")
+        packaged.append(out)
+
+    write_checksums(packaged)
+    return packaged
+
+
 def _default_cli_binary_path(dist_dir: Path) -> Path:
     cli_target = _binary_target_map()["cli"]
     output_base = _resolve_output_base(cli_target)
@@ -434,7 +482,7 @@ def install_cli_binary(
 
 def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="USnPw release helper (preflight, binaries, install-cli)."
+        description="USnPw release helper (preflight, binaries, bundle, install-cli)."
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -455,6 +503,18 @@ def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
         "--no-checksums",
         action="store_true",
         help="Skip writing .sha256 files for built binaries.",
+    )
+
+    bundle = sub.add_parser(
+        "bundle",
+        help="Package host-native release artifacts in dist/release (tar.gz on Linux/macOS, .exe on Windows).",
+    )
+    bundle.add_argument("--dist-dir", default=str(DEFAULT_DIST_DIR))
+    bundle.add_argument(
+        "--target",
+        action="append",
+        choices=[t.key for t in BINARY_TARGETS],
+        help="Bundle target to package (repeat flag). Default: cli + installer targets.",
     )
 
     install_cli = sub.add_parser(
@@ -512,6 +572,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             artifacts = build_binaries(dist_dir, target_keys=target_keys)
             if not args.no_checksums:
                 write_checksums(artifacts)
+            return 0
+        if command == "bundle":
+            dist_dir = Path(args.dist_dir).expanduser()
+            target_keys = tuple(args.target or DEFAULT_BINARY_TARGETS)
+            bundle_release_artifacts(dist_dir, target_keys=target_keys)
             return 0
         if command == "install-cli":
             dist_dir = Path(args.dist_dir).expanduser()

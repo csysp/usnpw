@@ -80,12 +80,20 @@ Default binary builds emit both:
 - `usnpw-<platform>-cli` (`.exe` on Windows)
 - `usnpw-<platform>-installer` (`.exe` on Windows)
 
+Run `python tools/release.py bundle` to package distributable assets into `dist/release`:
+- Windows: `usnpw-<platform>-*.exe`
+- Linux/macOS: `usnpw-<platform>-*.tar.gz` (preserves executable mode when extracted)
+
 Installer binary usage (host-native):
 - Windows: `.\dist\bin\usnpw-windows-installer.exe`
 - Linux: `./dist/bin/usnpw-linux-installer`
 - macOS: `./dist/bin/usnpw-macos-installer`
 - Optional: pass `--no-path-update` to skip persistent PATH updates.
 - Installer binaries embed the matching host CLI payload and can install without a separate `--artifact`.
+
+Published Linux/macOS release assets:
+- Extract first: `tar -xzf usnpw-<platform>-installer.tar.gz`
+- Run installer: `./usnpw-<platform>-installer`
 
 Iterative uninstall helper:
 - Windows: `py .\tools\uninstall_cli.py`

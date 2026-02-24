@@ -53,6 +53,11 @@ After `py .\tools\release.py binaries`, host-native CLI and installer artifacts 
 - Linux: `usnpw-linux-cli` and `usnpw-linux-installer`
 - macOS: `usnpw-macos-cli` and `usnpw-macos-installer`
 
+For distributable release assets, run `py .\tools\release.py bundle` (or `python3 ./tools/release.py bundle`).
+This writes installable artifacts to `dist/release`:
+- Windows: `usnpw-<platform>-*.exe`
+- Linux/macOS: `usnpw-<platform>-*.tar.gz` (preserves executable mode)
+
 Run the installer artifact on target hosts:
 ```powershell
 .\dist\bin\usnpw-windows-installer.exe
@@ -64,6 +69,12 @@ Run the installer artifact on target hosts:
 ./dist/bin/usnpw-linux-installer
 # optional: skip persistent PATH update
 ./dist/bin/usnpw-linux-installer --no-path-update
+```
+
+From published Linux/macOS release assets:
+```bash
+tar -xzf usnpw-<platform>-installer.tar.gz
+./usnpw-<platform>-installer
 ```
 
 Installer binaries embed the matching host CLI payload and can install without passing `--artifact`.

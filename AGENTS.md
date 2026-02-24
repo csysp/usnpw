@@ -81,11 +81,12 @@ Auditable credential generation for sensitive workflows.
 ## Release Ops
 - `py .\tools\release.py preflight` for compile + unit-test gate.
 - `py .\tools\release.py binaries` to build default host-native CLI + installer binaries (`usnpw-<platform>-cli`, `usnpw-<platform>-installer`) and checksums.
+- `py .\tools\release.py bundle` to package distributable release assets in `dist/release` (`.exe` on Windows, `.tar.gz` on Linux/macOS) with checksums.
 - `py .\tools\release.py install-cli` to install the CLI command (`usnpw`) into a user-local bin and persist PATH.
 - `py .\tools\release.py all` for preflight + host-native CLI/installer binary release prep.
 - Binary builds are pinned to `pyinstaller==6.16.0`; release commands hard-fail on version mismatch.
-- CI matrix workflow: `.github/workflows/ci-matrix.yml` (Windows/Linux/macOS preflight + native binaries).
-- Release workflow: `.github/workflows/release-artifacts.yml` (tag/manual native CLI/installer binary artifacts).
+- CI matrix workflow: `.github/workflows/ci-matrix.yml` (Windows/Linux/macOS preflight + binaries + packaged release artifacts).
+- Release workflow: `.github/workflows/release-artifacts.yml` (tag/manual packaged native CLI/installer release artifacts).
 - Signing:
   - GPG signatures for `*.sha256` sidecars are produced by CI (requires repo secrets `USNPW_GPG_PRIVATE_KEY` and optional `USNPW_GPG_PASSPHRASE`).
 

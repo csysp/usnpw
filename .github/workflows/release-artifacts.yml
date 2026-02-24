@@ -40,7 +40,10 @@ jobs:
           python -m pip install pyinstaller==6.16.0
 
       - name: Build default binaries
-        run: python tools/release.py binaries
+        run: python tools/release.py binaries --no-checksums
+
+      - name: Package release artifacts
+        run: python tools/release.py bundle
 
       - name: Upload binaries
         uses: actions/upload-artifact@v4
@@ -48,8 +51,8 @@ jobs:
           name: usnpw-${{ matrix.os }}
           if-no-files-found: error
           path: |
-            dist/bin/usnpw*
-            dist/bin/*.sha256
+            dist/release/usnpw*
+            dist/release/*.sha256
 
   sign:
     name: Sign Checksums
