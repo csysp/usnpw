@@ -126,6 +126,7 @@ COMMON_TOKENS: tuple[str, ...] = (
     "november",
     "december",
 )
+MAX_COMMON_TOKEN_LENGTH = max(len(token) for token in COMMON_TOKENS)
 COMMON_TOKEN_RANK = {token: idx + 1 for idx, token in enumerate(COMMON_TOKENS)}
 
 LEET_MAP: dict[str, str] = {
@@ -273,7 +274,8 @@ def _dictionary_matches(password: str) -> tuple[_Match, ...]:
     n = len(password)
     out: list[_Match] = []
     for start in range(n):
-        for end in range(start + 2, n):
+        max_end = min(n, start + MAX_COMMON_TOKEN_LENGTH)
+        for end in range(start + 2, max_end):
             token = password[start : end + 1]
             guesses = _dictionary_guesses_for_token(token)
             if guesses is None:
@@ -299,17 +301,23 @@ def _dictionary_guesses_for_token(token: str) -> float | None:
         (token_lc, False, False),
         (normalized, normalized != token_lc, False),
         (reversed_token, False, True),
-        (normalized[::-1], normalized != token_lc, True),
         (reversed_normalized, reversed_normalized != reversed_token, True),
     )
 
-    case_var = _case_variations(token)
-    leet_var = _leet_variations(token)
-    best: float | None = None
+    hits: list[tuple[int, bool, bool]] = []
     for candidate, leet_hit, reversed_hit in candidates:
         rank = COMMON_TOKEN_RANK.get(candidate)
         if rank is None:
             continue
+        hits.append((rank, leet_hit, reversed_hit))
+    if not hits:
+        return None
+
+    case_var = _case_variations(token)
+    needs_leet_var = any(leet_hit for _, leet_hit, _ in hits)
+    leet_var = _leet_variations(token) if needs_leet_var else 1.0
+    best: float | None = None
+    for rank, leet_hit, reversed_hit in hits:
         leet_factor = leet_var if leet_hit else 1.0
         reversed_var = 2.0 if reversed_hit else 1.0
         guesses = max(1.0, float(rank) * case_var * leet_factor * reversed_var)
@@ -466,7 +474,9 @@ def _date_matches(password: str) -> tuple[_Match, ...]:
                 if 1900 <= year <= 2099:
                     out.append(_Match(start, start + 3, math.log10(200.0), "date"))
 
-        for width in (6, 8):
+        # Compact matches are restricted to 8-digit forms to avoid
+        # over-penalizing random 6-digit numeric strings.
+        for width in (8,):
             if start + width > n:
                 continue
             token = password[start : start + width]
@@ -486,32 +496,21 @@ def _date_matches(password: str) -> tuple[_Match, ...]:
 
 
 def _compact_date_guesses(token: str) -> float | None:
-    if len(token) not in (6, 8):
+    if len(token) != 8:
         return None
 
     valid_orders = 0
-    year_digits = 4 if len(token) == 8 else 2
-
-    if len(token) == 8:
-        if _is_valid_date_parts(token[6:8], token[4:6], token[0:4]):
-            valid_orders += 1  # yyyymmdd
-        if _is_valid_date_parts(token[0:2], token[2:4], token[4:8]):
-            valid_orders += 1  # ddmmyyyy
-        if _is_valid_date_parts(token[2:4], token[0:2], token[4:8]):
-            valid_orders += 1  # mmddyyyy
-    else:
-        if _is_valid_date_parts(token[4:6], token[2:4], token[0:2]):
-            valid_orders += 1  # yymmdd
-        if _is_valid_date_parts(token[0:2], token[2:4], token[4:6]):
-            valid_orders += 1  # ddmmyy
-        if _is_valid_date_parts(token[2:4], token[0:2], token[4:6]):
-            valid_orders += 1  # mmddyy
+    if _is_valid_date_parts(token[6:8], token[4:6], token[0:4]):
+        valid_orders += 1  # yyyymmdd
+    if _is_valid_date_parts(token[0:2], token[2:4], token[4:8]):
+        valid_orders += 1  # ddmmyyyy
+    if _is_valid_date_parts(token[2:4], token[0:2], token[4:8]):
+        valid_orders += 1  # mmddyyyy
 
     if valid_orders == 0:
         return None
 
-    year_space = 200.0 if year_digits == 4 else 100.0
-    return 31.0 * 12.0 * year_space * float(valid_orders)
+    return 31.0 * 12.0 * 200.0 * float(valid_orders)
 
 
 def _separated_date_guesses(token: str) -> float | None:
@@ -544,12 +543,12 @@ def _separated_date_guesses(token: str) -> float | None:
     year_digits = 0
 
     first, second, third = parts
-    if len(first) in (2, 4) and len(second) <= 2 and len(third) <= 2:
+    if len(first) in (2, 4) and len(second) == 2 and len(third) == 2:
         if _is_valid_date_parts(third, second, first):
             valid_orders += 1  # yy(yy)-mm-dd
             year_digits = max(year_digits, len(first))
 
-    if len(third) in (2, 4) and len(first) <= 2 and len(second) <= 2:
+    if len(third) in (2, 4) and len(first) == 2 and len(second) == 2:
         if _is_valid_date_parts(first, second, third):
             valid_orders += 1  # dd-mm-yy(yy)
             year_digits = max(year_digits, len(third))

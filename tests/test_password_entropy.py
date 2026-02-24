@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import math
 import unittest
+from unittest.mock import patch
 
+import usnpw.core.password_entropy as password_entropy
 from usnpw.core.password_entropy import (
     estimate_pattern_aware_entropy_bits,
     estimate_theoretical_password_bits,
@@ -62,6 +64,32 @@ class PasswordEntropyTests(unittest.TestCase):
         theoretical_bits = estimate_theoretical_password_bits(len(valid_date), alphabet)
         self.assertLess(valid_bits, theoretical_bits)
         self.assertLess(valid_bits, invalid_bits)
+
+    def test_pattern_aware_entropy_penalizes_valid_compact_eight_digit_dates(self) -> None:
+        alphabet = "0123456789"
+        valid_date = "20241107"
+        observed_bits = estimate_pattern_aware_entropy_bits(valid_date, alphabet)
+        theoretical_bits = estimate_theoretical_password_bits(len(valid_date), alphabet)
+        self.assertLess(observed_bits, theoretical_bits)
+
+    def test_pattern_aware_entropy_does_not_treat_compact_six_digit_values_as_dates(self) -> None:
+        alphabet = "0123456789"
+        value = "975310"
+        observed_bits = estimate_pattern_aware_entropy_bits(value, alphabet)
+        theoretical_bits = estimate_theoretical_password_bits(len(value), alphabet)
+        self.assertTrue(math.isclose(observed_bits, theoretical_bits, rel_tol=0.0, abs_tol=0.001))
+
+    def test_dictionary_scan_is_bounded_by_common_token_length(self) -> None:
+        value = "x" * 120
+
+        with patch("usnpw.core.password_entropy._dictionary_guesses_for_token", return_value=None) as mock_probe:
+            password_entropy._dictionary_matches(value)
+
+        expected_calls = 0
+        for start in range(len(value)):
+            window = min(password_entropy.MAX_COMMON_TOKEN_LENGTH, len(value) - start)
+            expected_calls += max(0, window - 2)
+        self.assertEqual(mock_probe.call_count, expected_calls)
 
     def test_pattern_aware_entropy_keeps_irregular_values_near_theoretical(self) -> None:
         alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
