@@ -10,7 +10,6 @@ import py_compile
 import shutil
 import subprocess
 import sys
-import textwrap
 import unittest
 from dataclasses import dataclass
 from pathlib import Path
@@ -41,8 +40,14 @@ BINARY_TARGETS: tuple[BinaryTarget, ...] = (
         output_base="usnpw-{platform}-cli",
         collect_submodules=("usnpw.cli", "usnpw.core"),
     ),
+    BinaryTarget(
+        key="installer",
+        entrypoint="tools/cli_installer.py",
+        output_base="usnpw-{platform}-installer",
+        hidden_imports=("tools.release",),
+    ),
 )
-DEFAULT_BINARY_TARGETS: tuple[str, ...] = ("cli",)
+DEFAULT_BINARY_TARGETS: tuple[str, ...] = ("cli", "installer")
 
 
 def _binary_target_map() -> dict[str, BinaryTarget]:
@@ -174,65 +179,39 @@ def _target_artifact_path(bin_dir: Path, output_base: str) -> Path | None:
     return None
 
 
-def _windows_installer_script_text(artifact_name: str) -> str:
-    return textwrap.dedent(
-        f"""\
-        [CmdletBinding()]
-        param(
-            [string]$ArtifactPath = (Join-Path $PSScriptRoot '{artifact_name}'),
-            [string]$InstallDir = $(if ($env:LOCALAPPDATA) {{ Join-Path $env:LOCALAPPDATA 'usnpw\\bin' }} else {{ Join-Path $HOME 'AppData\\Local\\usnpw\\bin' }}),
-            [switch]$NoPathUpdate
-        )
+def _pyinstaller_data_separator() -> str:
+    return ";" if os.name == "nt" else ":"
 
-        $ErrorActionPreference = 'Stop'
 
-        if (-not (Test-Path -LiteralPath $ArtifactPath -PathType Leaf)) {{
-            throw "CLI artifact not found: $ArtifactPath"
-        }}
+def _resolve_cli_artifact_for_installer(*, bin_dir: Path, built_artifacts: dict[str, Path]) -> Path:
+    cli_artifact = built_artifacts.get("cli")
+    if cli_artifact is not None and cli_artifact.is_file():
+        return cli_artifact
 
-        New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
-        $Destination = Join-Path $InstallDir 'usnpw.exe'
-        Copy-Item -LiteralPath $ArtifactPath -Destination $Destination -Force
+    cli_target = _binary_target_map()["cli"]
+    cli_output_base = _resolve_output_base(cli_target)
+    discovered = _target_artifact_path(bin_dir, cli_output_base)
+    if discovered is not None and discovered.is_file():
+        return discovered
 
-        $Hash = (Get-FileHash -LiteralPath $Destination -Algorithm SHA256).Hash
-        $Sidecar = "$Destination.sha256"
-        Set-Content -LiteralPath $Sidecar -Value "$Hash *usnpw.exe" -Encoding Ascii
-
-        Write-Host "[installer] wrote $Destination"
-        Write-Host "[installer] wrote $Sidecar"
-
-        if ($NoPathUpdate) {{
-            Write-Host "[installer] skipped PATH update."
-            exit 0
-        }}
-
-        $CurrentPath = (Get-ItemProperty -Path 'HKCU:\\Environment' -Name Path -ErrorAction SilentlyContinue).Path
-        $Parts = @()
-        if ($CurrentPath) {{
-            $Parts = $CurrentPath -split ';' | Where-Object {{ $_ -and $_ -ine $InstallDir }}
-        }}
-
-        $NewPath = $InstallDir
-        if ($Parts.Count -gt 0) {{
-            $NewPath += ';' + ($Parts -join ';')
-        }}
-        Set-ItemProperty -Path 'HKCU:\\Environment' -Name Path -Value $NewPath
-        Write-Host "[installer] added to user PATH: $InstallDir"
-        Write-Host "[installer] restart your shell to use `usnpw` directly."
-        """
+    raise ValueError(
+        "installer target requires a host-matching CLI artifact. "
+        "Build the cli target first (or in the same command), for example: "
+        f"{sys.executable} .\\tools\\release.py binaries --target cli --target installer"
     )
 
 
-def _write_installer_artifact(*, target: BinaryTarget, output_base: str, artifact: Path) -> Path | None:
-    if target.key != "cli":
-        return None
-    if artifact.suffix.lower() != ".exe":
-        return None
-
-    installer = artifact.parent / f"{output_base}-installer.ps1"
-    installer.write_text(_windows_installer_script_text(artifact.name), encoding="utf-8")
-    print(f"[binaries] wrote {installer}")
-    return installer
+def _remove_legacy_installer_script_artifacts(bin_dir: Path) -> None:
+    cli_output_base = _resolve_output_base(_binary_target_map()["cli"])
+    legacy_script = bin_dir / f"{cli_output_base}-installer.ps1"
+    legacy_checksum = legacy_script.with_suffix(legacy_script.suffix + ".sha256")
+    for legacy in (legacy_script, legacy_checksum):
+        if not legacy.exists():
+            continue
+        if not legacy.is_file():
+            raise ValueError(f"unexpected non-file legacy installer artifact: {legacy}")
+        legacy.unlink()
+        print(f"[binaries] removed legacy artifact {legacy}")
 
 
 def build_binaries(dist_dir: Path, target_keys: Sequence[str]) -> list[Path]:
@@ -248,8 +227,10 @@ def build_binaries(dist_dir: Path, target_keys: Sequence[str]) -> list[Path]:
     bin_dir.mkdir(parents=True, exist_ok=True)
     work_root.mkdir(parents=True, exist_ok=True)
     spec_dir.mkdir(parents=True, exist_ok=True)
+    _remove_legacy_installer_script_artifacts(bin_dir)
 
     artifacts: list[Path] = []
+    built_artifacts: dict[str, Path] = {}
     for target in selected:
         output_base = _resolve_output_base(target)
         cmd = [
@@ -272,6 +253,10 @@ def build_binaries(dist_dir: Path, target_keys: Sequence[str]) -> list[Path]:
             cmd.extend(["--hidden-import", hidden_import])
         for package_name in target.collect_submodules:
             cmd.extend(["--collect-submodules", package_name])
+        if target.key == "installer":
+            cli_artifact = _resolve_cli_artifact_for_installer(bin_dir=bin_dir, built_artifacts=built_artifacts)
+            add_data = f"{cli_artifact}{_pyinstaller_data_separator()}."
+            cmd.extend(["--add-data", add_data])
         if target.windowed:
             cmd.append("--windowed")
         cmd.append(target.entrypoint)
@@ -296,10 +281,7 @@ def build_binaries(dist_dir: Path, target_keys: Sequence[str]) -> list[Path]:
             )
         print(f"[binaries] wrote {artifact}")
         artifacts.append(artifact)
-
-        installer = _write_installer_artifact(target=target, output_base=output_base, artifact=artifact)
-        if installer is not None:
-            artifacts.append(installer)
+        built_artifacts[target.key] = artifact
 
     return artifacts
 
@@ -467,7 +449,7 @@ def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
         "--target",
         action="append",
         choices=[t.key for t in BINARY_TARGETS],
-        help="Binary target to build (repeat flag). Default: cli target.",
+        help="Binary target to build (repeat flag). Default: cli + installer targets.",
     )
     binaries.add_argument(
         "--no-checksums",

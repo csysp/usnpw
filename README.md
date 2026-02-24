@@ -76,8 +76,16 @@ python3 ./tools/release.py install-cli
 ```
 
 Build note: `tools/release.py` enforces `pyinstaller==6.16.0` for local binary builds.
-Windows binary builds also emit a companion installer script in `dist/bin/`:
-`usnpw-windows-cli-installer.ps1`
+Default binary builds emit both:
+- `usnpw-<platform>-cli` (`.exe` on Windows)
+- `usnpw-<platform>-installer` (`.exe` on Windows)
+
+Installer binary usage (host-native):
+- Windows: `.\dist\bin\usnpw-windows-installer.exe`
+- Linux: `./dist/bin/usnpw-linux-installer`
+- macOS: `./dist/bin/usnpw-macos-installer`
+- Optional: pass `--no-path-update` to skip persistent PATH updates.
+- Installer binaries embed the matching host CLI payload and can install without a separate `--artifact`.
 
 Iterative uninstall helper:
 - Windows: `py .\tools\uninstall_cli.py`

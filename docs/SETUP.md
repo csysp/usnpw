@@ -1,7 +1,7 @@
 # Setup
 
 USnPw is a local, offline CLI project with Python stdlib-only runtime dependencies.
-Setup varies dependant on the users needs, run via python script for easy iteration or run via command line with an included installer ps1 for Windows to add PATH etc.
+Setup varies dependant on the users needs, run via python script for easy iteration or run via command line with a host-native installer binary to add PATH.
 CSysP recommends CLI for day to day use as it is what is maintained via updates. 
 
 ## Requirements
@@ -47,16 +47,26 @@ py .\tools\release.py preflight
 
 This runs compile checks and all unit tests in `tests/`.
 
-## Windows Installer Artifact
-After `py .\tools\release.py binaries`, a companion installer script is written to:
-`dist\bin\usnpw-windows-cli-installer.ps1`
+## Native Installer Artifacts
+After `py .\tools\release.py binaries`, host-native CLI and installer artifacts are written to `dist\bin`:
+- Windows: `usnpw-windows-cli.exe` and `usnpw-windows-installer.exe`
+- Linux: `usnpw-linux-cli` and `usnpw-linux-installer`
+- macOS: `usnpw-macos-cli` and `usnpw-macos-installer`
 
-Run it on target hosts:
+Run the installer artifact on target hosts:
 ```powershell
-.\dist\bin\usnpw-windows-cli-installer.ps1
+.\dist\bin\usnpw-windows-installer.exe
 # optional: skip persistent PATH update
-.\dist\bin\usnpw-windows-cli-installer.ps1 -NoPathUpdate
+.\dist\bin\usnpw-windows-installer.exe --no-path-update
 ```
+
+```bash
+./dist/bin/usnpw-linux-installer
+# optional: skip persistent PATH update
+./dist/bin/usnpw-linux-installer --no-path-update
+```
+
+Installer binaries embed the matching host CLI payload and can install without passing `--artifact`.
 
 ## Uninstall (Iterative Testing)
 ```powershell
