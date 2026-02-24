@@ -14,6 +14,9 @@ Why use usnpw? It's just easier and safer.
 # Passwords
 usnpw -n 5 -l 24
 
+# Passwords with estimated entropy metadata
+usnpw -n 5 -l 24 --show-meta
+
 # Usernames (hardened defaults)
 usnpw username -n 20 --profile reddit
 
@@ -79,6 +82,9 @@ Windows binary builds also emit a companion installer script in `dist/bin/`:
 Iterative uninstall helper:
 - Windows: `py .\tools\uninstall_cli.py`
 - Linux/macOS: `python3 ./tools/uninstall_cli.py`
+
+RNG health probe:
+- `py .\tools\rng_health_probe.py`
 
 ## License
 This project is licensed under GNU GPLv3 (`GPL-3.0-only`). See `LICENSE`.

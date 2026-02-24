@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from typing import Optional, Tuple
 
 
@@ -34,6 +35,35 @@ class PasswordRequest:
 @dataclass(frozen=True)
 class PasswordResult:
     outputs: Tuple[str, ...]
+    estimated_entropy_bits: float = 0.0
+    entropy_bits_by_output: Tuple[float, ...] = ()
+    entropy_quality_by_output: Tuple[str, ...] = ()
+
+    def as_lines(self, show_meta: bool = False) -> Tuple[str, ...]:
+        if not show_meta:
+            return self.outputs
+
+        has_per_output_bits = len(self.entropy_bits_by_output) == len(self.outputs)
+        has_per_output_quality = len(self.entropy_quality_by_output) == len(self.outputs)
+
+        lines: list[str] = []
+        for idx, value in enumerate(self.outputs):
+            bits_value = self.entropy_bits_by_output[idx] if has_per_output_bits else self.estimated_entropy_bits
+            if math.isfinite(bits_value):
+                rounded = round(bits_value, 3)
+                if rounded.is_integer():
+                    bits_text = str(int(rounded))
+                else:
+                    bits_text = f"{rounded:.3f}".rstrip("0").rstrip(".")
+            else:
+                bits_text = "unknown"
+
+            meta = f"[entropy={bits_text} bits"
+            if has_per_output_quality and self.entropy_quality_by_output[idx]:
+                meta += f" quality={self.entropy_quality_by_output[idx]}"
+            meta += "]"
+            lines.append(f"{value}\t{meta}")
+        return tuple(lines)
 
 
 @dataclass(frozen=True)

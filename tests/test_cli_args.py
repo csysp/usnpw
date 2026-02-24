@@ -29,6 +29,14 @@ class CliArgTests(unittest.TestCase):
         args = parse_password_args([])
         self.assertFalse(args.max_entropy)
 
+    def test_password_cli_meta_flag(self) -> None:
+        args = parse_password_args(["--meta"])
+        self.assertTrue(args.show_meta)
+
+    def test_password_cli_meta_default(self) -> None:
+        args = parse_password_args([])
+        self.assertFalse(args.show_meta)
+
     def test_username_cli_main_rejects_invalid_count(self) -> None:
         stderr = io.StringIO()
         with redirect_stderr(stderr):
@@ -49,6 +57,18 @@ class CliArgTests(unittest.TestCase):
             rc = password_main(["--format", "hex", "--bytes", "-1"])
         self.assertEqual(rc, 2)
         self.assertIn("bytes must be >= 0", stderr.getvalue())
+
+    def test_password_cli_main_show_meta_outputs_entropy(self) -> None:
+        stdout = io.StringIO()
+        with redirect_stdout(stdout):
+            rc = password_main(["-n", "1", "-l", "8", "--charset", "ab", "--meta"])
+        self.assertEqual(rc, 0)
+        lines = [line for line in stdout.getvalue().splitlines() if line.strip()]
+        self.assertEqual(len(lines), 1)
+        self.assertRegex(
+            lines[0],
+            r"\t\[entropy=[0-9]+(?:\.[0-9]+)? bits quality=(bad|poor|weak|good|excellent)\]$",
+        )
 
     def test_usnpw_cli_defaults_to_password_mode(self) -> None:
         stdout = io.StringIO()

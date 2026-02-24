@@ -55,6 +55,7 @@ def main(argv: list[str] | None = None) -> int:
     _maybe_run_external_scanners()
 
     steps: list[tuple[str, list[str]]] = [
+        ("rng-health", [sys.executable, "tools/rng_health_probe.py"]),
         ("preflight", [sys.executable, "tools/release.py", "preflight"]),
     ]
 

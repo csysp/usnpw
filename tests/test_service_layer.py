@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 import string
 import unittest
 from unittest.mock import patch
@@ -15,13 +16,75 @@ class ServiceLayerTests(unittest.TestCase):
         request = PasswordRequest(count=4, length=12, charset="abc123", format="password")
         result = generate_passwords(request)
         self.assertEqual(len(result.outputs), 4)
+        self.assertEqual(len(result.entropy_bits_by_output), 4)
+        self.assertEqual(len(result.entropy_quality_by_output), 4)
         for value in result.outputs:
             self.assertEqual(len(value), 12)
             self.assertTrue(set(value).issubset(set("abc123")))
 
+    def test_password_service_estimates_password_entropy_bits(self) -> None:
+        result = generate_passwords(PasswordRequest(count=1, length=12, charset="ab", format="password"))
+        self.assertEqual(result.estimated_entropy_bits, 12.0)
+        self.assertEqual(len(result.entropy_bits_by_output), 1)
+        self.assertGreaterEqual(result.entropy_bits_by_output[0], 0.0)
+        self.assertLessEqual(result.entropy_bits_by_output[0], 12.0)
+        self.assertIn(result.entropy_quality_by_output[0], {"bad", "poor", "weak", "good", "excellent"})
+
+    def test_password_service_estimates_non_integer_password_entropy_bits(self) -> None:
+        result = generate_passwords(PasswordRequest(count=1, length=10, charset="abc", format="password"))
+        self.assertAlmostEqual(result.estimated_entropy_bits, 10.0 * 1.584962500721156, places=9)
+
+    def test_password_service_estimates_token_entropy_bits(self) -> None:
+        result = generate_passwords(PasswordRequest(count=1, format="hex", entropy_bytes=16))
+        self.assertEqual(result.estimated_entropy_bits, 128.0)
+        self.assertEqual(result.entropy_bits_by_output, (128.0,))
+        self.assertEqual(result.entropy_quality_by_output, ("excellent",))
+
+    def test_password_service_caps_hash_entropy_to_input_bits(self) -> None:
+        result = generate_passwords(PasswordRequest(count=1, format="sha512", entropy_bytes=16))
+        self.assertEqual(result.estimated_entropy_bits, 128.0)
+        self.assertEqual(result.entropy_bits_by_output, (128.0,))
+        self.assertEqual(result.entropy_quality_by_output, ("excellent",))
+
+    def test_password_service_estimates_uuid4_entropy_bits(self) -> None:
+        result = generate_passwords(PasswordRequest(count=1, format="uuid", entropy_bytes=16))
+        self.assertEqual(result.estimated_entropy_bits, 122.0)
+        self.assertEqual(result.entropy_bits_by_output, (122.0,))
+        self.assertEqual(result.entropy_quality_by_output, ("excellent",))
+
+    def test_password_service_estimates_bip39_entropy_bits(self) -> None:
+        path = Path(".tmp_test_service_bip39_wordlist.txt")
+        try:
+            words = [f"w{i}" for i in range(2048)]
+            path.write_text("\n".join(words) + "\n", encoding="utf-8", newline="\n")
+            result = generate_passwords(
+                PasswordRequest(
+                    count=1,
+                    format="bip39",
+                    words=12,
+                    bip39_wordlist=str(path),
+                )
+            )
+            self.assertEqual(result.estimated_entropy_bits, 128.0)
+            self.assertEqual(result.entropy_bits_by_output, (128.0,))
+            self.assertEqual(result.entropy_quality_by_output, ("excellent",))
+        finally:
+            try:
+                path.unlink()
+            except OSError:
+                pass
+
     def test_password_service_bits_validation(self) -> None:
         with self.assertRaisesRegex(ValueError, "bits must be a multiple of 8"):
             generate_passwords(PasswordRequest(count=1, format="hex", bits=130))
+
+    def test_password_service_rejects_single_character_charset(self) -> None:
+        with self.assertRaisesRegex(ValueError, "at least 2 distinct characters"):
+            generate_passwords(PasswordRequest(count=1, length=16, charset="a", format="password"))
+
+    def test_password_service_rejects_duplicate_charset_characters(self) -> None:
+        with self.assertRaisesRegex(ValueError, "contains duplicate characters"):
+            generate_passwords(PasswordRequest(count=1, length=16, charset="abca", format="password"))
 
     def test_password_service_rejects_negative_bytes(self) -> None:
         with self.assertRaisesRegex(ValueError, "bytes must be >= 0"):
@@ -46,9 +109,33 @@ class ServiceLayerTests(unittest.TestCase):
             )
         )
         self.assertEqual(len(result.outputs), 2)
+        self.assertEqual(result.estimated_entropy_bits, 512.0)
+        self.assertEqual(len(result.entropy_bits_by_output), 2)
+        self.assertEqual(len(result.entropy_quality_by_output), 2)
         for value in result.outputs:
             self.assertEqual(len(value), 86)
             self.assertRegex(value, r"^[A-Za-z0-9_-]+$")
+        for bits in result.entropy_bits_by_output:
+            self.assertGreaterEqual(bits, 0.0)
+            self.assertLessEqual(bits, 512.0)
+        for quality in result.entropy_quality_by_output:
+            self.assertIn(quality, {"bad", "poor", "weak", "good", "excellent"})
+
+    def test_password_service_surfaces_csprng_probe_failures(self) -> None:
+        with patch(
+            "usnpw.core.password_service.engine.assert_csprng_ready",
+            side_effect=OSError("OS CSPRNG failure requesting 1 byte(s): denied"),
+        ):
+            with self.assertRaisesRegex(ValueError, "OS CSPRNG failure"):
+                generate_passwords(PasswordRequest(count=1, format="hex"))
+
+    def test_password_service_surfaces_password_mode_rng_failures(self) -> None:
+        with patch(
+            "usnpw.core.password_service.engine.generate_password",
+            side_effect=OSError("OS CSPRNG failure requesting 32 byte(s): denied"),
+        ):
+            with self.assertRaisesRegex(ValueError, "OS CSPRNG failure"):
+                generate_passwords(PasswordRequest(count=1, format="password", charset="ab", length=12))
 
     def test_username_service_count_validation(self) -> None:
         with self.assertRaisesRegex(ValueError, "count must be > 0"):

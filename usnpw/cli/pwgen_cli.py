@@ -59,6 +59,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--words", type=int, default=24, choices=[12, 18, 24], help="(bip39) number of words")
     parser.add_argument("--delim", default=" ", help="(bip39) delimiter between words (default: space)")
     parser.add_argument("--bip39-wordlist", default="", help="(bip39) path to 2048-word English wordlist file")
+    parser.add_argument(
+        "--show-meta",
+        "--meta",
+        action="store_true",
+        help="Print estimated entropy metadata per output.",
+    )
 
     return parser.parse_args(argv)
 
@@ -88,7 +94,7 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as exc:
         print(format_error_text(exc), file=sys.stderr)
         return 2
-    for line in result.outputs:
+    for line in result.as_lines(show_meta=args.show_meta):
         print(line)
     return 0
 

@@ -21,6 +21,26 @@ from pathlib import Path
 
 # ---------------- Password mode (unbiased selection) ----------------
 
+def secure_random_bytes(nbytes: int) -> bytes:
+    """Read bytes from the OS CSPRNG and fail closed on provider errors."""
+    if nbytes < 0:
+        raise ValueError("nbytes must be >= 0")
+    try:
+        out = os.urandom(nbytes)
+    except OSError as exc:
+        raise OSError(f"OS CSPRNG failure requesting {nbytes} byte(s): {exc}") from exc
+    if len(out) != nbytes:
+        raise OSError(
+            f"OS CSPRNG returned an unexpected byte count: expected {nbytes}, got {len(out)}"
+        )
+    return out
+
+
+def assert_csprng_ready() -> None:
+    """One-byte probe to ensure secure randomness is available before generation."""
+    secure_random_bytes(1)
+
+
 def generate_password(length: int, alphabet: str) -> str:
     if not alphabet:
         raise ValueError("alphabet is empty")
@@ -202,7 +222,7 @@ def bip39_mnemonic(num_words: int, wordlist: list[str]) -> str:
     if num_words not in (12, 18, 24):
         raise ValueError("BIP39 words must be 12, 18, or 24")
     ent_bits = {12: 128, 18: 192, 24: 256}[num_words]
-    ent = os.urandom(ent_bits // 8)
+    ent = secure_random_bytes(ent_bits // 8)
     checksum_len = ent_bits // 32
     h = hashlib.sha256(ent).digest()
     ent_bitstr = "".join(f"{b:08b}" for b in ent)
@@ -245,7 +265,7 @@ def token_from_format(
     bip39_delim: str,
 ) -> str:
     if fmt == "uuid":
-        return str(uuid.UUID(bytes=os.urandom(16), version=4))
+        return str(uuid.UUID(bytes=secure_random_bytes(16), version=4))
 
     if fmt == "bip39":
         if not bip39_wordlist_path:
@@ -254,7 +274,7 @@ def token_from_format(
         phrase = bip39_mnemonic(bip39_words, wl)
         return phrase.replace(" ", bip39_delim)
 
-    raw = os.urandom(nbytes)
+    raw = secure_random_bytes(nbytes)
 
     if fmt in ("hex", "base64", "base64url", "crock32", "crock32check", "base58", "base58check"):
         return encode_bytes_by_name(raw, fmt)

@@ -34,3 +34,30 @@ Use `--show-meta` for debugging scheme/case/separator decisions.
 ```powershell
 usnpw username -n 10 --profile github --show-meta
 ```
+
+Password mode also supports metadata output for estimated entropy:
+
+```powershell
+usnpw -n 3 -l 24 --show-meta
+usnpw --format sha512 --bytes 16 --show-meta
+```
+
+Metadata includes per-output entropy estimate plus a KeePassXC-style quality tier:
+- `bad`
+- `poor`
+- `weak`
+- `good`
+- `excellent`
+
+Entropy vetting uses a clean-room, stdlib-only matcher model inspired by zxcvbn concepts:
+- dictionary and leet token matches
+- repeated-pattern and sequence detection
+- keyboard-walk and compact-date pattern checks
+- brute-force fallback with minimum-guess segmentation
+
+## RNG Health Probe
+Run a local CSPRNG sanity probe (health check only, not certification):
+
+```powershell
+py .\tools\rng_health_probe.py
+```
