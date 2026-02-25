@@ -20,6 +20,7 @@ from typing import Sequence
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DIST_DIR = ROOT / "dist"
 PYINSTALLER_REQUIRED_VERSION = "6.16.0"
+POSIX_PATH_MARKER = "# Added by usnpw install-cli"
 
 COMPILE_ROOTS: tuple[str, ...] = ("usnpw", "tools")
 TESTS_ROOT = ROOT / "tests"
@@ -411,9 +412,37 @@ def _ensure_user_path_windows(path_entry: Path) -> bool:
     return True
 
 
-def _ensure_user_path_posix(path_entry: Path) -> bool:
-    profile = Path.home() / ".profile"
-    marker = "# Added by usnpw install-cli"
+def _posix_shell_name() -> str:
+    shell = os.environ.get("SHELL", "")
+    if not shell:
+        return ""
+    return Path(shell).name.lower()
+
+
+def _posix_profile_targets() -> tuple[Path, ...]:
+    # Persist PATH in shell-relevant startup files so installer changes survive across
+    # default login/interactive flows on macOS and Linux.
+    home = Path.home()
+    targets: list[Path] = [home / ".profile"]
+    shell = _posix_shell_name()
+    if shell == "zsh":
+        targets.append(home / ".zprofile")
+    elif shell == "bash":
+        targets.append(home / ".bash_profile")
+
+    for existing in (
+        home / ".zprofile",
+        home / ".zshrc",
+        home / ".bash_profile",
+        home / ".bashrc",
+    ):
+        if existing.exists() and existing not in targets:
+            targets.append(existing)
+
+    return tuple(targets)
+
+
+def _ensure_path_export_in_profile(*, profile: Path, path_entry: Path) -> bool:
     export_line = f'export PATH="{path_entry}:$PATH"'
     existing = profile.read_text(encoding="utf-8") if profile.exists() else ""
     if export_line in existing:
@@ -422,9 +451,17 @@ def _ensure_user_path_posix(path_entry: Path) -> bool:
     new_content = existing
     if new_content and not new_content.endswith("\n"):
         new_content += "\n"
-    new_content += f"{marker}\n{export_line}\n"
+    new_content += f"{POSIX_PATH_MARKER}\n{export_line}\n"
     profile.write_text(new_content, encoding="utf-8")
     return True
+
+
+def _ensure_user_path_posix(path_entry: Path) -> bool:
+    changed = False
+    for profile in _posix_profile_targets():
+        if _ensure_path_export_in_profile(profile=profile, path_entry=path_entry):
+            changed = True
+    return changed
 
 
 def ensure_user_path_persistent(path_entry: Path) -> bool:

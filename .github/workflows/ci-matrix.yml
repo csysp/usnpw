@@ -62,6 +62,9 @@ jobs:
       - name: Build default binaries
         run: python tools/release.py binaries --no-checksums
 
+      - name: Smoke test installer
+        run: python tools/ci_smoke_installer.py
+
       - name: Package release artifacts
         run: python tools/release.py bundle
 

@@ -23,6 +23,36 @@ def _normalize_path_for_compare(path: str) -> str:
     return os.path.normcase(os.path.normpath(str(expanded)))
 
 
+def _posix_shell_name() -> str:
+    shell = os.environ.get("SHELL", "")
+    if not shell:
+        return ""
+    return Path(shell).name.lower()
+
+
+def _posix_profile_targets() -> tuple[Path, ...]:
+    # Mirror install-cli PATH target selection so uninstall removes all injected
+    # profile entries instead of leaving stale PATH mutations behind.
+    home = Path.home()
+    targets: list[Path] = [home / ".profile"]
+    shell = _posix_shell_name()
+    if shell == "zsh":
+        targets.append(home / ".zprofile")
+    elif shell == "bash":
+        targets.append(home / ".bash_profile")
+
+    for existing in (
+        home / ".zprofile",
+        home / ".zshrc",
+        home / ".bash_profile",
+        home / ".bashrc",
+    ):
+        if existing.exists() and existing not in targets:
+            targets.append(existing)
+
+    return tuple(targets)
+
+
 def _remove_user_path_windows(path_entry: Path) -> bool:
     import winreg
 
@@ -68,28 +98,32 @@ def _remove_user_path_windows(path_entry: Path) -> bool:
 
 
 def _remove_user_path_posix(path_entry: Path) -> bool:
-    profile = Path.home() / ".profile"
-    if not profile.exists():
-        return False
-
     export_line = f'export PATH="{path_entry}:$PATH"'
-    lines = profile.read_text(encoding="utf-8").splitlines()
-    kept_lines: list[str] = []
-    removed = False
-    for line in lines:
-        if line == PATH_MARKER or line == export_line:
-            removed = True
+    removed_any = False
+
+    for profile in _posix_profile_targets():
+        if not profile.exists():
             continue
-        kept_lines.append(line)
 
-    if not removed:
-        return False
+        lines = profile.read_text(encoding="utf-8").splitlines()
+        kept_lines: list[str] = []
+        removed = False
+        for line in lines:
+            if line == PATH_MARKER or line == export_line:
+                removed = True
+                continue
+            kept_lines.append(line)
 
-    new_content = "\n".join(kept_lines)
-    if new_content:
-        new_content += "\n"
-    profile.write_text(new_content, encoding="utf-8")
-    return True
+        if not removed:
+            continue
+
+        new_content = "\n".join(kept_lines)
+        if new_content:
+            new_content += "\n"
+        profile.write_text(new_content, encoding="utf-8")
+        removed_any = True
+
+    return removed_any
 
 
 def _remove_user_path(path_entry: Path) -> bool:
