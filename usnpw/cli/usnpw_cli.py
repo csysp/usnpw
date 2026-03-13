@@ -42,8 +42,8 @@ def _generate_pair() -> int:
 
     username = un_result.records[0].username
     password = pw_result.outputs[0]
-    print(username)
-    print(password)
+    print(f"username: {username}")
+    print(f"password: {password}")
     return 0
 
 
