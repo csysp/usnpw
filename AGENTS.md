@@ -69,6 +69,8 @@ Auditable credential generation for sensitive workflows.
 - Correctness: case-insensitive uniqueness where platform semantics require it.
 - UX: errors are explicit and actionable.
 - Bloat: remove dead code and avoid duplicate pathways.
+- Errors: use structured error types or codes for routing, not string comparison on exception messages.
+- Tests: new encoding or format code must include correctness tests before merge.
 
 ## Validation Minimum
 - `py -m py_compile usnpw/core/password_engine.py usnpw/core/username_generation.py usnpw/core/username_lexicon.py usnpw/core/username_schemes.py usnpw/core/username_stream_state.py usnpw/core/username_uniqueness.py usnpw/core/username_policies.py`
@@ -76,6 +78,10 @@ Auditable credential generation for sensitive workflows.
 - `py -m py_compile usnpw/cli/pwgen_cli.py usnpw/cli/opsec_username_cli.py usnpw/cli/usnpw_cli.py usnpw/__main__.py`
 - `py -m unittest tests/test_core_smoke.py`
 - `py -m unittest tests/test_service_layer.py`
+- `py -m unittest tests/test_cli_args.py`
+- `py -m unittest tests/test_password_engine.py`
+- `py -m unittest tests/test_password_entropy.py`
+- `py -m unittest tests/test_rng_health_probe.py`
 - Run sample generation in password and username modes across at least two platform profiles.
 
 ## Release Ops
@@ -93,6 +99,58 @@ Auditable credential generation for sensitive workflows.
 ## Local-Only Notes
 - Keep sensitive/operator notes out of git history (for example: `GitHub Audit For Agent.md`).
 - Prefer `.git/info/exclude` for local-only ignore rules to avoid changing repo policy.
+
+## Project Health (Audited 2026-03-13)
+
+### Security Posture: Strong
+- 0 Critical, 0 High, 3 Medium, 4 Low findings.
+- CSPRNG usage correct throughout (`os.urandom` + `secrets` module, zero use of `random`).
+- Zero non-stdlib dependencies in application code.
+- Fail-closed error handling confirmed across all CLI and service layers.
+- Zero bare `except:` or `except Exception:` in the codebase.
+- GPG signing pipeline well-structured with proper passphrase handling.
+
+### Medium Security Findings (Open)
+1. No upper bound on `--count` for password generation -- can OOM/hang on extreme values (`password_service.py`).
+2. BIP39 `--bip39-wordlist` reads arbitrary file paths without symlink or directory restriction (`password_engine.py:174-218`).
+3. `lru_cache` on pseudoword pools means single pool per process lifetime -- acceptable for CLI, document as limitation for library reuse (`username_lexicon.py:166-173`).
+
+### Low Security Findings (Open)
+1. Stream root secret not zeroizable in CPython (language limitation, documented in threat model).
+2. Installer modifies user PATH by default without interactive prompt; `--no-path-update` exists but opt-out.
+3. GitHub Actions pinned by mutable tag (`@v4`/`@v5`) not commit SHA -- supply chain hardening opportunity.
+
+### Quality Assessment: B (Needs One Revision Cycle)
+- Architecture separation is clean: CLI -> Service -> Core, no circular dependencies.
+- Spec-to-code alignment is strong; non-negotiables are honored in code.
+- README usage examples verified accurate against actual CLI flags.
+
+### Known Dead Code (Violates Review Checklist)
+- `usnpw/core/error_dialect.py`: `error_payload()`, `error_payload_from_exception()`, `make_error()` -- never imported outside module.
+- `usnpw/core/username_uniqueness.py`: `contains_subsequence()` -- defined and exported but never called.
+
+### Test Coverage Gaps
+- No tests for custom encoding implementations: crock32, crock32check, base58, base58check, `group_string`.
+- No BIP39 mnemonic output correctness test (checksum verification against spec).
+- No tests for per-platform policy output validity (15 profiles, 0 policy-specific tests).
+- No property-based or fuzz testing for the entropy estimator (~840 lines).
+- No test for `error_dialect.py` formatting functions.
+
+### Workflow / Process Issues (Prioritized)
+1. **Release workflow has no preflight gate** -- `release-artifacts.yml` skips tests before building binaries. A tag push from any branch bypasses CI. High priority.
+2. **Duplicated install/uninstall utilities** -- `_host_platform_tag()`, `_default_cli_install_dir()`, `_normalize_path_for_compare()`, `_posix_shell_name()`, `_posix_profile_targets()`, `PATH_MARKER` are copied across `tools/release.py`, `tools/uninstall_cli.py`, and `tools/ci_smoke_installer.py`. Path divergence = broken uninstaller.
+3. **String-based error routing** -- `username_generation.py` and `username_service.py` compare exception message strings to route errors. Fragile; should use error codes or exception subclasses.
+4. **CI workflow duplication** -- `release-artifacts.yml` binary build steps are near-verbatim copies of `ci-matrix.yml`. Should extract to reusable `workflow_call`.
+5. **No `pyproject.toml`** -- no standard project metadata, no `pip install -e .` for development, no coverage tooling integration.
+6. **Password CLI defaults hardcoded** -- `pwgen_cli.py` hardcodes `default=20` for length instead of importing from `PasswordRequest` field defaults in `models.py`. Risk of silent drift.
+7. **`_BASE36` constant defined twice** -- `username_schemes.py:25` and `username_stream_state.py:9`.
+
+### Anti-Fingerprinting Status: Multi-Layered, Not Yet Adversarially Validated
+- 10 distinct variation dimensions implemented (scheme, separator, case, noise, tag placement, tag scrambling, token blocking, repeated-pattern rejection, platform canonicalization, pool permutation).
+- Stream counter scrambling via HMAC-derived affine cipher is mathematically sound.
+- Limitation: English-only vocabulary (~750 words) is a fingerprinting vector at scale.
+- Limitation: noise injection patterns are statistically detectable in large corpora.
+- The planned "Red Team" tool (see Future Additions) would close this validation gap.
 
 ## Future Additions
 - "Red Team" anti-anti-fingerprinting tool

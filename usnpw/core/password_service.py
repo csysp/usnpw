@@ -9,7 +9,7 @@ from usnpw.core.password_entropy import (
     estimate_theoretical_password_bits,
     quality_from_entropy_bits,
 )
-from usnpw.core.models import PasswordRequest, PasswordResult
+from usnpw.core.models import PASSWORD_MAX_COUNT, PasswordRequest, PasswordResult
 
 MAX_ENTROPY_BYTES = 64
 MAX_ENTROPY_FORMAT = "base64url"
@@ -83,12 +83,16 @@ def generate_passwords(request: PasswordRequest) -> PasswordResult:
 
     if request.count <= 0:
         raise ValueError("count must be > 0")
+    if request.count > PASSWORD_MAX_COUNT:
+        raise ValueError(
+            f"count must be <= {PASSWORD_MAX_COUNT:,} to prevent resource exhaustion"
+        )
     if request.entropy_bytes < 0:
         raise ValueError("bytes must be >= 0")
     if request.bits < 0:
         raise ValueError("bits must be >= 0")
     if request.format == "bip39" and not request.bip39_wordlist.strip():
-        raise ValueError("bip39_wordlist is required when format is bip39")
+        raise ValueError("bip39_wordlist filename is required when format is bip39")
     try:
         engine.assert_csprng_ready()
     except OSError as e:

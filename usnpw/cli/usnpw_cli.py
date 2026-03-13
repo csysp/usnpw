@@ -15,20 +15,42 @@ def _print_help() -> None:
         "USnPw unified CLI\n"
         "\n"
         "Usage:\n"
-        "  usnpw [password flags]\n"
+        "  usnpw                          generate one username + one password\n"
         "  usnpw password [password flags]\n"
         "  usnpw username [username flags]\n"
         "\n"
         "Examples:\n"
+        "  usnpw\n"
         "  usnpw -n 5 -l 24\n"
         "  usnpw username -n 20 --profile reddit\n"
     )
 
 
+def _generate_pair() -> int:
+    """Generate one username and one password with hardened defaults."""
+    from usnpw.core.error_dialect import format_error_text
+    from usnpw.core.models import PasswordRequest, UsernameRequest
+    from usnpw.core.password_service import generate_passwords
+    from usnpw.core.username_service import generate_usernames
+
+    try:
+        un_result = generate_usernames(UsernameRequest(count=1))
+        pw_result = generate_passwords(PasswordRequest(count=1))
+    except ValueError as exc:
+        print(format_error_text(exc), file=sys.stderr)
+        return 2
+
+    username = un_result.records[0].username
+    password = pw_result.outputs[0]
+    print(username)
+    print(password)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     if not args:
-        return password_main([])
+        return _generate_pair()
 
     command = args[0].lower()
     tail = args[1:]

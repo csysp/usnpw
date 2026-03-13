@@ -5,6 +5,8 @@ import math
 from typing import Optional, Tuple
 
 
+PASSWORD_MAX_COUNT = 10_000
+
 USERNAME_DEFAULT_NO_LEADING_DIGIT = True
 USERNAME_DEFAULT_MAX_SCHEME_PCT = 0.28
 USERNAME_DEFAULT_HISTORY = 10
@@ -29,7 +31,7 @@ class PasswordRequest:
     group_pad: str = ""
     words: int = 24
     delim: str = " "
-    bip39_wordlist: str = ""
+    bip39_wordlist: str = "bip39_en.txt"
     show_meta: bool = False
 
 

@@ -171,12 +171,48 @@ def group_string(s: str, size: int, sep: str = "-", pad_char: str = "") -> str:
 
 # ---------------- BIP39 (requires wordlist file) ----------------
 
-def load_bip39_wordlist(path: str) -> list[str]:
-    p = Path(path).expanduser()
+# Hardcoded data directory -- BIP39 wordlists must live here.
+# Threat-model rationale: prevents arbitrary file reads via --bip39-wordlist.
+_BIP39_DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+BIP39_DEFAULT_WORDLIST = "bip39_en.txt"
+
+
+def load_bip39_wordlist(filename: str) -> list[str]:
+    """Load a BIP39 wordlist from the package data directory only.
+
+    The filename is resolved strictly within usnpw/data/ to prevent
+    path-traversal and arbitrary file reads.  Symlinks are rejected.
+    """
+    if not filename or not filename.strip():
+        filename = BIP39_DEFAULT_WORDLIST
+
+    # Reject anything that looks like a path -- only bare filenames allowed.
+    clean = filename.strip()
+    if "/" in clean or "\\" in clean or clean != Path(clean).name:
+        raise ValueError(
+            f"BIP39 wordlist must be a filename, not a path: {filename!r}. "
+            f"Place wordlist files in {_BIP39_DATA_DIR}"
+        )
+
+    p = (_BIP39_DATA_DIR / clean).resolve()
+
+    # Ensure resolved path stays within the data directory.
+    if not str(p).startswith(str(_BIP39_DATA_DIR)):
+        raise ValueError(
+            f"BIP39 wordlist path escapes data directory: {filename!r}"
+        )
+
+    # Reject symlinks to prevent following links to arbitrary files.
+    if p.is_symlink():
+        raise ValueError(f"BIP39 wordlist must not be a symlink: {p}")
+
     try:
         st = p.stat()
     except FileNotFoundError as exc:
-        raise ValueError(f"BIP39 wordlist file not found: {p}") from exc
+        raise ValueError(
+            f"BIP39 wordlist file not found: {p}. "
+            f"Place a 2048-word BIP39 English wordlist at {_BIP39_DATA_DIR / BIP39_DEFAULT_WORDLIST}"
+        ) from exc
     except OSError as exc:
         raise ValueError(f"Unable to stat BIP39 wordlist file '{p}': {exc}") from exc
 
@@ -269,7 +305,7 @@ def token_from_format(
 
     if fmt == "bip39":
         if not bip39_wordlist_path:
-            raise ValueError("bip39 requires --bip39-wordlist pointing to the 2048-word English list")
+            raise ValueError("bip39 requires a wordlist filename (place wordlist in usnpw/data/)")
         wl = load_bip39_wordlist(bip39_wordlist_path)
         phrase = bip39_mnemonic(bip39_words, wl)
         return phrase.replace(" ", bip39_delim)

@@ -65,7 +65,8 @@ class ServiceLayerTests(unittest.TestCase):
         self.assertEqual(result.entropy_quality_by_output, ("excellent",))
 
     def test_password_service_estimates_bip39_entropy_bits(self) -> None:
-        path = Path(".tmp_test_service_bip39_wordlist.txt")
+        from usnpw.core.password_engine import _BIP39_DATA_DIR
+        path = _BIP39_DATA_DIR / ".tmp_test_service_bip39_wordlist.txt"
         try:
             words = [f"w{i}" for i in range(2048)]
             path.write_text("\n".join(words) + "\n", encoding="utf-8", newline="\n")
@@ -74,7 +75,7 @@ class ServiceLayerTests(unittest.TestCase):
                     count=1,
                     format="bip39",
                     words=12,
-                    bip39_wordlist=str(path),
+                    bip39_wordlist=path.name,
                     show_meta=True,
                 )
             )
@@ -108,7 +109,7 @@ class ServiceLayerTests(unittest.TestCase):
             generate_passwords(PasswordRequest(count=1, format="hex", bits=-8))
 
     def test_password_service_bip39_requires_wordlist_path(self) -> None:
-        with self.assertRaisesRegex(ValueError, "bip39_wordlist is required when format is bip39"):
+        with self.assertRaisesRegex(ValueError, "bip39_wordlist filename is required when format is bip39"):
             generate_passwords(PasswordRequest(count=1, format="bip39", words=24, bip39_wordlist=""))
 
     def test_password_service_max_entropy_preset(self) -> None:

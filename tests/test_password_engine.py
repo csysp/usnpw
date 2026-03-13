@@ -6,10 +6,16 @@ from pathlib import Path
 from unittest.mock import patch
 
 from usnpw.core.password_engine import (
+    _BIP39_DATA_DIR,
     load_bip39_wordlist,
     secure_random_bytes,
     token_from_format,
 )
+
+
+def _data_path(name: str) -> Path:
+    """Return a path inside the hardcoded BIP39 data directory for tests."""
+    return _BIP39_DATA_DIR / name
 
 
 class PasswordEngineTests(unittest.TestCase):
@@ -40,12 +46,20 @@ class PasswordEngineTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "not found"):
             load_bip39_wordlist(".tmp_missing_bip39_wordlist.txt")
 
+    def test_bip39_wordlist_rejects_path_traversal(self) -> None:
+        with self.assertRaisesRegex(ValueError, "must be a filename"):
+            load_bip39_wordlist("../../etc/shadow")
+
+    def test_bip39_wordlist_rejects_absolute_path(self) -> None:
+        with self.assertRaisesRegex(ValueError, "must be a filename"):
+            load_bip39_wordlist("/tmp/wordlist.txt")
+
     def test_bip39_wordlist_wrong_count_raises(self) -> None:
-        path = Path(".tmp_test_bip39_wordlist_count.txt")
+        path = _data_path(".tmp_test_bip39_wordlist_count.txt")
         try:
             path.write_text("abandon\n", encoding="utf-8", newline="\n")
             with self.assertRaisesRegex(ValueError, "2048"):
-                load_bip39_wordlist(str(path))
+                load_bip39_wordlist(path.name)
         finally:
             try:
                 path.unlink()
@@ -53,12 +67,12 @@ class PasswordEngineTests(unittest.TestCase):
                 pass
 
     def test_bip39_wordlist_duplicate_word_raises(self) -> None:
-        path = Path(".tmp_test_bip39_wordlist_dupes.txt")
+        path = _data_path(".tmp_test_bip39_wordlist_dupes.txt")
         try:
             words = [f"w{i}" for i in range(2047)] + ["w0"]
             path.write_text("\n".join(words) + "\n", encoding="utf-8", newline="\n")
             with self.assertRaisesRegex(ValueError, "unique"):
-                load_bip39_wordlist(str(path))
+                load_bip39_wordlist(path.name)
         finally:
             try:
                 path.unlink()
@@ -66,12 +80,12 @@ class PasswordEngineTests(unittest.TestCase):
                 pass
 
     def test_bip39_wordlist_whitespace_word_raises(self) -> None:
-        path = Path(".tmp_test_bip39_wordlist_ws.txt")
+        path = _data_path(".tmp_test_bip39_wordlist_ws.txt")
         try:
             words = [f"w{i}" for i in range(2047)] + ["hello world"]
             path.write_text("\n".join(words) + "\n", encoding="utf-8", newline="\n")
             with self.assertRaisesRegex(ValueError, "whitespace"):
-                load_bip39_wordlist(str(path))
+                load_bip39_wordlist(path.name)
         finally:
             try:
                 path.unlink()
@@ -79,11 +93,11 @@ class PasswordEngineTests(unittest.TestCase):
                 pass
 
     def test_bip39_wordlist_valid_loads(self) -> None:
-        path = Path(".tmp_test_bip39_wordlist_ok.txt")
+        path = _data_path(".tmp_test_bip39_wordlist_ok.txt")
         try:
             words = [f"w{i}" for i in range(2048)]
             path.write_text("\n".join(words) + "\n", encoding="utf-8", newline="\n")
-            loaded = load_bip39_wordlist(str(path))
+            loaded = load_bip39_wordlist(path.name)
             self.assertEqual(len(loaded), 2048)
         finally:
             try:
