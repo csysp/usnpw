@@ -7,7 +7,7 @@ Designed around proven OS CSPRNG for strong password/secret generation and it al
 Hardened by default it is single-user CLI only, stdlib-only, no API server, no GUI, no telemetry, no background network services.
 FOSS and easily extensible this tool can greatly increase time saved in iterative testing situations, as well as general use on the internet.
 
-Why use usnpw? It's just easier and safer.
+It does what it says on the box... type usnpw into your terminal and it prints a username and password! How nice is that?
 
 ## Usage Examples (Once Installed)
 ```powershell
