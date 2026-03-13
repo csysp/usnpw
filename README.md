@@ -1,4 +1,4 @@
-# usnpw
+# <p align="center"> usnpw </p>
 
 [![CI Matrix](https://github.com/csysp/usnpw/actions/workflows/ci-matrix.yml/badge.svg)](https://github.com/csysp/usnpw/actions/workflows/ci-matrix.yml)
 
