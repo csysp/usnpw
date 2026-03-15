@@ -11,6 +11,9 @@ It does what it says on the box... type usnpw into your terminal and it prints a
 
 ## Usage Examples (Once Installed)
 ```powershell
+Instant Username + Password
+usnpw
+
 # Passwords
 usnpw -n 5 -l 24
 
