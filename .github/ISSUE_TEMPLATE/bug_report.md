@@ -3,7 +3,8 @@ name: Bug report
 about: Report a reproducible defect in CLI or release workflows
 title: "[bug] "
 labels: bug
-assignees: ""
+assignees: ''
+
 ---
 
 ## Summary
