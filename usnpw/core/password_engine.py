@@ -62,7 +62,7 @@ def encode_base64url(b: bytes) -> str:
     return base64.urlsafe_b64encode(b).decode("ascii").rstrip("=")
 
 
-# Crockford Base32 (human-friendly)
+# Crockford Base32
 _CROCK32_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 _CROCK32_CHECK_ALPHABET = _CROCK32_ALPHABET + "*~$=U"  # mod 37
 _CROCK32_VALUE = {ch: i for i, ch in enumerate(_CROCK32_ALPHABET)}
@@ -103,7 +103,7 @@ def encode_crock32check(data: bytes) -> str:
     return payload + crock32_checksum(payload)
 
 
-# Base58 (Bitcoin alphabet) + Base58Check
+# Base58 + Base58Check
 _BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 
 
@@ -171,8 +171,7 @@ def group_string(s: str, size: int, sep: str = "-", pad_char: str = "") -> str:
 
 # ---------------- BIP39 (requires wordlist file) ----------------
 
-# Hardcoded data directory -- BIP39 wordlists must live here.
-# Threat-model rationale: prevents arbitrary file reads via --bip39-wordlist.
+# Hardcoded data directory -- BIP39 wordlists must live here. Prevents arbitrary file reads via --bip39-wordlist.
 _BIP39_DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 BIP39_DEFAULT_WORDLIST = "bip39_en.txt"
 
