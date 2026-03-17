@@ -1,6 +1,8 @@
 # <p align="center"> usnpw </p>
 
 [![CI Matrix](https://github.com/csysp/usnpw/actions/workflows/ci-matrix.yml/badge.svg)](https://github.com/csysp/usnpw/actions/workflows/ci-matrix.yml)
+[![CodeQL](https://github.com/csysp/usnpw/actions/workflows/github-code-scanning/codeql/badge.svg)](https://github.com/csysp/usnpw/actions/workflows/github-code-scanning/codeql)
+[![Release Artifacts](https://github.com/csysp/usnpw/actions/workflows/release-artifacts.yml/badge.svg)](https://github.com/csysp/usnpw/actions/workflows/release-artifacts.yml)
 
 usnpw is a local only CLI for private credential generation.
 Designed around proven OS CSPRNG for strong password/secret generation and it also includes a profile-aware, anti-fingerprint username generator. 
